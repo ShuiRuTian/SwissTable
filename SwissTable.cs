@@ -170,174 +170,44 @@ namespace System.Collections.Generic
             Entry[]? entries = _entries;
             Debug.Assert(entries != null, "expected entries to be non-null");
 
-            IEqualityComparer<TKey>? comparer = _comparer;
-            uint hashCode = (uint)((comparer == null) ? key.GetHashCode() : comparer.GetHashCode(key));
+            var entry = Find(key);
 
-            uint collisionCount = 0;
-            ref int bucket = ref GetBucket(hashCode);
-            int i = bucket - 1; // Value in _buckets is 1-based
-
-            if (comparer == null)
+            if (entry.HasValue)
             {
-                if (typeof(TKey).IsValueType)
+                if (behavior == InsertionBehavior.OverwriteExisting)
                 {
-                    // ValueType: Devirtualize with EqualityComparer<TValue>.Default intrinsic
-                    while (true)
-                    {
-                        // Should be a while loop https://github.com/dotnet/runtime/issues/9422
-                        // Test uint in if rather than loop condition to drop range check for following array access
-                        if ((uint)i >= (uint)entries.Length)
-                        {
-                            break;
-                        }
-
-                        if (entries[i].hashCode == hashCode && EqualityComparer<TKey>.Default.Equals(entries[i].key, key))
-                        {
-                            if (behavior == InsertionBehavior.OverwriteExisting)
-                            {
-                                entries[i].value = value;
-                                return true;
-                            }
-
-                            if (behavior == InsertionBehavior.ThrowOnExisting)
-                            {
-                                ThrowHelper.ThrowAddingDuplicateWithKeyArgumentException(key);
-                            }
-
-                            return false;
-                        }
-
-                        i = entries[i].next;
-
-                        collisionCount++;
-                        if (collisionCount > (uint)entries.Length)
-                        {
-                            // The chain of entries forms a loop; which means a concurrent update has happened.
-                            // Break out of the loop and throw, rather than looping forever.
-                            ThrowHelper.ThrowInvalidOperationException_ConcurrentOperationsNotSupported();
-                        }
-                    }
+                    entry.Value.value = value;
+                    return true;
                 }
-                else
+
+                if (behavior == InsertionBehavior.ThrowOnExisting)
                 {
-                    // Object type: Shared Generic, EqualityComparer<TValue>.Default won't devirtualize
-                    // https://github.com/dotnet/runtime/issues/10050
-                    // So cache in a local rather than get EqualityComparer per loop iteration
-                    EqualityComparer<TKey> defaultComparer = EqualityComparer<TKey>.Default;
-                    while (true)
-                    {
-                        // Should be a while loop https://github.com/dotnet/runtime/issues/9422
-                        // Test uint in if rather than loop condition to drop range check for following array access
-                        if ((uint)i >= (uint)entries.Length)
-                        {
-                            break;
-                        }
-
-                        if (entries[i].hashCode == hashCode && defaultComparer.Equals(entries[i].key, key))
-                        {
-                            if (behavior == InsertionBehavior.OverwriteExisting)
-                            {
-                                entries[i].value = value;
-                                return true;
-                            }
-
-                            if (behavior == InsertionBehavior.ThrowOnExisting)
-                            {
-                                ThrowHelper.ThrowAddingDuplicateWithKeyArgumentException(key);
-                            }
-
-                            return false;
-                        }
-
-                        i = entries[i].next;
-
-                        collisionCount++;
-                        if (collisionCount > (uint)entries.Length)
-                        {
-                            // The chain of entries forms a loop; which means a concurrent update has happened.
-                            // Break out of the loop and throw, rather than looping forever.
-                            ThrowHelper.ThrowInvalidOperationException_ConcurrentOperationsNotSupported();
-                        }
-                    }
+                    ThrowHelper.ThrowAddingDuplicateWithKeyArgumentException(key);
                 }
+                return false;
             }
-            else
+
+            var hashCode = GetHashCodeOfKey(key);
+            // We can avoid growing the table once we have reached our load
+            // factor if we are replacing a tombstone(Delete). This works since the
+            // number of EMPTY slots does not change in this case.
+            var index = find_insert_slot(hashCode);
+            var old_ctrl = _controls[index];
+            if (_growth_left == 0 && SwissTableHelper.special_is_empty(old_ctrl))
             {
-                while (true)
-                {
-                    // Should be a while loop https://github.com/dotnet/runtime/issues/9422
-                    // Test uint in if rather than loop condition to drop range check for following array access
-                    if ((uint)i >= (uint)entries.Length)
-                    {
-                        break;
-                    }
-
-                    if (entries[i].hashCode == hashCode && comparer.Equals(entries[i].key, key))
-                    {
-                        if (behavior == InsertionBehavior.OverwriteExisting)
-                        {
-                            entries[i].value = value;
-                            return true;
-                        }
-
-                        if (behavior == InsertionBehavior.ThrowOnExisting)
-                        {
-                            ThrowHelper.ThrowAddingDuplicateWithKeyArgumentException(key);
-                        }
-
-                        return false;
-                    }
-
-                    i = entries[i].next;
-
-                    collisionCount++;
-                    if (collisionCount > (uint)entries.Length)
-                    {
-                        // The chain of entries forms a loop; which means a concurrent update has happened.
-                        // Break out of the loop and throw, rather than looping forever.
-                        ThrowHelper.ThrowInvalidOperationException_ConcurrentOperationsNotSupported();
-                    }
-                }
+                self.reserve(1, hasher);
+                index = find_insert_slot(hashCode);
             }
-
-            int index;
-            if (_freeCount > 0)
-            {
-                index = _freeList;
-                Debug.Assert((StartOfFreeList - entries[_freeList].next) >= -1, "shouldn't overflow because `next` cannot underflow");
-                _freeList = StartOfFreeList - entries[_freeList].next;
-                _freeCount--;
-            }
-            else
-            {
-                int count = _count;
-                if (count == entries.Length)
-                {
-                    Resize();
-                    bucket = ref GetBucket(hashCode);
-                }
-                index = count;
-                _count = count + 1;
-                entries = _entries;
-            }
-
-            ref Entry entry = ref entries![index];
-            entry.hashCode = hashCode;
-            entry.next = bucket - 1; // Value in _buckets is 1-based
-            entry.key = key;
-            entry.value = value;
-            bucket = index + 1; // Value in _buckets is 1-based
-            _version++;
-
-            // Value types never rehash
-            if (!typeof(TKey).IsValueType && collisionCount > HashHelpers.HashCollisionThreshold && comparer is NonRandomizedStringEqualityComparer)
-            {
-                // If we hit the collision threshold we'll need to switch to the comparer which is using randomized string hashing
-                // i.e. EqualityComparer<string>.Default.
-                Resize(entries.Length, true);
-            }
-
+            record_item_insert_at(index, old_ctrl, hashCode);
+            _entries[index].value = value;
             return true;
+        }
+
+        private void record_item_insert_at(int index, byte old_ctrl, int hash)
+        {
+            _growth_left -= SwissTableHelper.special_is_empty(old_ctrl) ? 1 : 0;
+            set_ctrl_h2(index, hash);
+            _count += 1;
         }
 
         private struct Entry
@@ -351,7 +221,7 @@ namespace System.Collections.Generic
         private void Resize(int newSize, bool forceNewHashCodes)
         {
             // Value types never rehash
-            Debug.Assert(!forceNewHashCodes || !typeof(T).IsValueType);
+            Debug.Assert(!forceNewHashCodes || !typeof(TKey).IsValueType);
             Debug.Assert(_entries != null, "_buckets should be non-null");
             Debug.Assert(newSize >= _entries.Length);
         }
@@ -412,28 +282,21 @@ namespace System.Collections.Generic
 
         private bool Equal(TKey key1, TKey key2)
         {
-            var comparer = _comparer;
-            if (comparer == null)
-            {
-                if (typeof(TKey).IsValueType)
-                {
+            // TODO: in Dictionary, this is a complex condition to improve performance, learn from it.
+            var comparer = _comparer ?? EqualityComparer<TKey>.Default;
+            return comparer.Equals(key1, key2);
+        }
 
-                }
-                else
-                {
-                    EqualityComparer<TKey> defaultComparer = EqualityComparer<TKey>.Default;
-                }
-            }
-            else
-            {
-
-            }
+        private int GetHashCodeOfKey(TKey key)
+        {
+            IEqualityComparer<TKey>? comparer = _comparer;
+            var hash = (comparer == null) ? key.GetHashCode() : comparer.GetHashCode(key);
+            return hash;
         }
 
         private unsafe Entry? Find(TKey key)
         {
-            IEqualityComparer<TKey>? comparer = _comparer;
-            var hash = ((comparer == null) ? key.GetHashCode() : comparer.GetHashCode(key));
+            var hash = GetHashCodeOfKey(key);
             var h2_hash = SwissTableHelper.h2(hash);
             var probe_seq = new ProbeSeq(hash, _bucket_mask);
             while (true)
@@ -449,18 +312,19 @@ namespace System.Collections.Generic
                         bitmask = bitmask.remove_lowest_bit();
                         var index = (probe_seq.pos + bit) & _bucket_mask;
                         var tmp = _entries[index];
-                        if (Equal(key, tmp.key)){
+                        if (Equal(key, tmp.key))
+                        {
                             return tmp;
                         }
                     }
-                    if(group.match_empty().any_bit_set()){
+                    if (group.match_empty().any_bit_set())
+                    {
                         return null;
                     }
                 }
                 probe_seq.move_next(_bucket_mask);
             }
         }
-
 
         /// Marks all table buckets as empty without dropping their contents.
         private void clear_no_drop()
@@ -475,6 +339,7 @@ namespace System.Collections.Generic
 
         private unsafe void erase(int index)
         {
+            // TODO: Attention, in language like c#, we could not just only set mark to Delete to assume it is deleted, the reference is still here, and GC would not collect it.
             Debug.Assert(SwissTableHelper.is_full(_controls[index]));
             int index_before;
             unchecked
@@ -604,7 +469,7 @@ namespace System.Collections.Generic
         /// A triangular probe has us jump by 1 more group every time. So first we
         /// jump by 1 group (meaning we just continue our linear scan), then 2 groups
         /// (skipping over 1 group), then 3 groups (skipping over 2 groups), and so on.
-        /// 
+        ///
         /// The proof is a simple number theory question: i*(i+1)/2 can walk through the complete residue system of 2n
         /// to prove this, we could prove when `0 <= i <= j < 2n`, `i*(i+1)/2 mod 2n == j*(j+1)/2` iff `i == j`
         /// if this equal is true, we could have `(i-j)(i+j+1)=4n*k`, k is integer. This is obvious if i!=j, the left part is odd, but right is always even.
