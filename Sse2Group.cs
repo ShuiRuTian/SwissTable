@@ -39,7 +39,7 @@ namespace System.Collections.Generic
 
         public override int leading_zeros()
         {
-            return leading_zeros(this._data);
+            return MostSignificantBit(this._data);
         }
 
         public override int? lowest_set_bit()
@@ -66,49 +66,45 @@ namespace System.Collections.Generic
 
         public override int trailing_zeros()
         {
-            return trailing_zeros(this._data);
+            return LeastSignificantBit(this._data);
         }
 
         #region Helper
-
-        // for any non-zero numbser, we could always get its non-zero bit(trailing or leading) in log(n) time, like binary search:
-        // 0x 0000_FFFF
-        // 0x 0000_00FF
-        // 0x 0000_000F
-        // 0x 0000_0003
-        // 0x 0000_0001
-        // but this would be a lot of if-else and it is really boring. so we just give the quick implement now.
-        private static int trailing_zeros(ushort number)
+        private static int LeastSignificantBit(ushort Arg)
         {
-            if (number == 0) return 16;
-            int count = 0;
-            for (var i = 0; i < 16; i++)
-            {
-                if ((number & 0x0001) != 0)
-                    break;
-                number >>= 1;
-                count += 1;
-            }
-            return count;
+            int RetVal = 15;
+            if ((Arg & 0x00ff) != 0) { RetVal -= 8; Arg &= 0x00ff; }
+            if ((Arg & 0x0f0f) != 0) { RetVal -= 4; Arg &= 0x0f0f; }
+            if ((Arg & 0x3333) != 0) { RetVal -= 2; Arg &= 0x3333; }
+            if ((Arg & 0x5555) != 0) RetVal -= 1;
+            return RetVal;
+        }
+        private static int LeastSignificantBit2(ushort Arg)
+        {
+            var tmp = (short)Arg;
+            var num = tmp & ~(-tmp);
+            num |= num << 1;
+            num |= num << 2;
+            num |= num << 4;
+            num |= num << 8;
+            num |= num << 16;
+            return ~num;
         }
 
-        private static int leading_zeros(ushort number)
+        private static int MostSignificantBit(ushort Arg)
         {
-            if (number == 0) return 16;
-            int count = 0;
-            for (var i = 0; i < 16; i++)
-            {
-                if ((number & 0x8000) != 0)
-                    break;
-                number <<= 1;
-                count += 1;
-            }
-            return count;
+            int RetVal = 0;
+            if ((Arg & 0xff00) != 0) { RetVal += 8; Arg &= 0xff00; }
+            if ((Arg & 0xf0f0) != 0) { RetVal += 4; Arg &= 0xf0f0; }
+            if ((Arg & 0xcccc) != 0) { RetVal += 2; Arg &= 0xcccc; }
+            if ((Arg & 0xaaaa) != 0) RetVal += 1;
+            return RetVal;
         }
+
         #endregion
     }
 
-    class Sse2GroupInfo: IGroupInfo
+    class Sse2GroupInfo : IGroupInfo
     {
         // mem::size_of::<Self>() in rust.
         public const uint WIDTH = 128 / 8;
@@ -127,7 +123,7 @@ namespace System.Collections.Generic
 
         // the only purpose is to choose the implement.
         internal Sse2Group()
-        {}
+        { }
 
 
         internal Sse2Group(Vector128<byte> data)

@@ -120,12 +120,13 @@ namespace System.Collections.Generic
                 byte[] oldCtrls = source._controls;
                 Entry[] oldEntries = source._entries;
 
-                if (source._comparer == _comparer)
-                {
-                    // If comparers are the same, we can copy _entries without rehashing.
-                    CopyEntries(oldEntries, source._count);
-                    return;
-                }
+                // TODO: Is there a quick way? just copy is one approach, but I want to do it "clean"(No "delete" control byte)
+                // if (source._comparer == _comparer)
+                // {
+                //     // If comparers are the same, we can copy _entries without rehashing.
+                //     CopyEntries(oldEntries, source._count);
+                //     return;
+                // }
 
                 // Comparers differ need to rehash all the entires via Add
                 int count = source._count;
@@ -153,7 +154,6 @@ namespace System.Collections.Generic
             Debug.Assert(modified); // If there was an existing key and the Add failed, an exception will already have been thrown.
         }
 
-
         private bool TryInsert(TKey key, TValue value, InsertionBehavior behavior)
         {
             if (key == null)
@@ -170,13 +170,13 @@ namespace System.Collections.Generic
             Entry[]? entries = _entries;
             Debug.Assert(entries != null, "expected entries to be non-null");
 
-            var entry = Find(key);
+            ref TValue oldValue = ref FindValue(key);
 
-            if (entry.HasValue)
+            if (!Unsafe.IsNullRef(ref oldValue))
             {
                 if (behavior == InsertionBehavior.OverwriteExisting)
                 {
-                    entry.Value.value = value;
+                    oldValue = value;
                     return true;
                 }
 
@@ -293,12 +293,18 @@ namespace System.Collections.Generic
             var hash = (comparer == null) ? key.GetHashCode() : comparer.GetHashCode(key);
             return hash;
         }
-
-        private unsafe Entry? Find(TKey key)
+        internal unsafe ref TValue FindValue(TKey key)
         {
+            if (key == null)
+            {
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+            }
+            Debug.Assert(_entries != null, "expected entries to be != null");
+
             var hash = GetHashCodeOfKey(key);
             var h2_hash = SwissTableHelper.h2(hash);
             var probe_seq = new ProbeSeq(hash, _bucket_mask);
+            ref Entry entry = ref Unsafe.NullRef<Entry>();
             while (true)
             {
                 fixed (byte* ptr = &_controls[probe_seq.pos])
@@ -311,15 +317,16 @@ namespace System.Collections.Generic
                         var bit = bitmask.lowest_set_bit().Value;
                         bitmask = bitmask.remove_lowest_bit();
                         var index = (probe_seq.pos + bit) & _bucket_mask;
-                        var tmp = _entries[index];
-                        if (Equal(key, tmp.key))
+                        entry = ref _entries[index];
+                        if (Equal(key, entry.key))
                         {
-                            return tmp;
+                            ref TValue value = ref entry.value;
+                            return ref value;
                         }
                     }
                     if (group.match_empty().any_bit_set())
                     {
-                        return null;
+                        return ref Unsafe.NullRef<TValue>(); ;
                     }
                 }
                 probe_seq.move_next(_bucket_mask);
