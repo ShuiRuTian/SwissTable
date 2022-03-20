@@ -32,6 +32,50 @@ namespace System.Collections.Generic
         // number of actual values stored in the map
         private int _count = 0;
 
+
+        // Control byte value for an empty bucket.
+        private const byte EMPTY = 0b1111_1111;
+
+        /// Control byte value for a deleted bucket.
+        private const byte DELETED = 0b1000_0000;
+
+        /// Checks whether a control byte represents a full bucket (top bit is clear).
+        // #[inline]
+        private static bool is_full(byte ctrl) => (ctrl & 0x80) == 0;
+
+        /// Checks whether a control byte represents a special value (top bit is set).
+        // #[inline]
+        private static bool is_special(byte ctrl) => (ctrl & 0x80) != 0;
+
+        /// Checks whether a special control value is EMPTY (just check 1 bit).
+        // #[inline]
+        private static bool special_is_empty(byte ctrl)
+        {
+            Debug.Assert(is_special(ctrl));
+            return (ctrl & 0x01) != 0;
+        }
+
+        /// Primary hash function, used to select the initial bucket to probe from.
+        // #[inline]
+        // #[allow(clippy::cast_possible_truncation)]
+        private static int h1(int hash)
+        {
+            // On 32-bit platforms we simply ignore the higher hash bits.
+            return hash;
+        }
+
+        /// Secondary hash function, saved in the low 7 bits of the control byte.
+        // #[inline]
+        // #[allow(clippy::cast_possible_truncation)]
+        private static byte h2(int hash)
+        {
+            // Grab the top 7 bits of the hash. While the hash is normally a full 64-bit
+            // value, some hash functions (such as FxHash) produce a usize result
+            // instead, which means that the top 32 bits are 0 on 32-bit platforms.
+            var top7 = hash >> 25;
+            return (byte)(top7 & 0x7f); // truncation
+        }
+
         public MyDictionary() : this(0, null) { }
 
         public MyDictionary(int capacity) : this(capacity, null) { }
@@ -133,7 +177,7 @@ namespace System.Collections.Generic
                 for (int i = 0; i < count; i++)
                 {
                     // Only copy if an entry
-                    if (SwissTableHelper.is_full(oldCtrls[i]))
+                    if (is_full(oldCtrls[i]))
                     {
                         Add(oldEntries[i].key, oldEntries[i].value);
                     }
@@ -193,7 +237,7 @@ namespace System.Collections.Generic
             // number of EMPTY slots does not change in this case.
             var index = find_insert_slot(hashCode);
             var old_ctrl = _controls[index];
-            if (_growth_left == 0 && SwissTableHelper.special_is_empty(old_ctrl))
+            if (_growth_left == 0 && special_is_empty(old_ctrl))
             {
                 self.reserve(1, hasher);
                 index = find_insert_slot(hashCode);
@@ -205,7 +249,7 @@ namespace System.Collections.Generic
 
         private void record_item_insert_at(int index, byte old_ctrl, int hash)
         {
-            _growth_left -= SwissTableHelper.special_is_empty(old_ctrl) ? 1 : 0;
+            _growth_left -= special_is_empty(old_ctrl) ? 1 : 0;
             set_ctrl_h2(index, hash);
             _count += 1;
         }
@@ -262,7 +306,7 @@ namespace System.Collections.Generic
                         // table. This second scan is guaranteed to find an empty
                         // slot (due to the load factor) before hitting the trailing
                         // control bytes (containing EMPTY).
-                        if (SwissTableHelper.is_full(_controls[result]))
+                        if (is_full(_controls[result]))
                         {
                             Debug.Assert(_bucket_mask < _groupInfo.WIDTH);
                             Debug.Assert(probe_seq.pos != 0);
@@ -302,7 +346,7 @@ namespace System.Collections.Generic
             Debug.Assert(_entries != null, "expected entries to be != null");
 
             var hash = GetHashCodeOfKey(key);
-            var h2_hash = SwissTableHelper.h2(hash);
+            var h2_hash = h2(hash);
             var probe_seq = new ProbeSeq(hash, _bucket_mask);
             ref Entry entry = ref Unsafe.NullRef<Entry>();
             while (true)
@@ -338,7 +382,7 @@ namespace System.Collections.Generic
         {
             if (!is_empty_singleton)
             {
-                Array.Fill(_controls, SwissTableHelper.EMPTY);
+                Array.Fill(_controls, EMPTY);
             }
             _count = 0;
             _growth_left = bucket_mask_to_capacity(_bucket_mask);
@@ -347,7 +391,7 @@ namespace System.Collections.Generic
         private unsafe void erase(int index)
         {
             // TODO: Attention, in language like c#, we could not just only set mark to Delete to assume it is deleted, the reference is still here, and GC would not collect it.
-            Debug.Assert(SwissTableHelper.is_full(_controls[index]));
+            Debug.Assert(is_full(_controls[index]));
             int index_before;
             unchecked
             {
@@ -370,11 +414,11 @@ namespace System.Collections.Generic
                 // begining of a group.
                 if (empty_before.leading_zeros() + empty_after.trailing_zeros() >= _groupInfo.WIDTH)
                 {
-                    ctrl = SwissTableHelper.DELETED;
+                    ctrl = DELETED;
                 }
                 else
                 {
-                    ctrl = SwissTableHelper.EMPTY;
+                    ctrl = EMPTY;
                     _growth_left += 1;
                 }
                 set_ctrl(index, ctrl);
@@ -384,7 +428,7 @@ namespace System.Collections.Generic
 
         private void set_ctrl_h2(int index, int hash)
         {
-            set_ctrl(index, SwissTableHelper.h2(hash));
+            set_ctrl(index, h2(hash));
         }
 
         /// Sets a control byte, and possibly also the replicated control byte at
@@ -487,8 +531,8 @@ namespace System.Collections.Generic
             public int stride;
             public ProbeSeq(int hash, int bucket_mask)
             {
-                pos = SwissTableHelper.h1(hash) & bucket_mask;
-                stride = 0;
+                this.pos = h1(hash) & bucket_mask;
+                this.stride = 0;
             }
             public void move_next(int bucket_mask)
             {

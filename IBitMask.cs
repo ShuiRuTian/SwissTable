@@ -14,12 +14,12 @@ namespace System.Collections.Generic
     /// case, `BITMASK_STRIDE` will be 8 to indicate a divide-by-8 should be
     /// performed on counts/indices to normalize this difference. `BITMASK_MASK` is
     /// similarly a mask of all the actually-used bits.
-    public abstract class IBitMask
+    public interface IBitMask
     {
         /// Returns a new `BitMask` with all bits inverted.
         // #[inline]
         // #[must_use]
-        public abstract IBitMask invert();
+        public IBitMask invert();
 
         /// Flip the bit in the mask for the entry at the given index.
         ///
@@ -27,37 +27,37 @@ namespace System.Collections.Generic
         // #[inline]
         // #[allow(clippy::cast_ptr_alignment)]
         // #[cfg(feature = "raw")]
-        public abstract bool flip(uint index);
+        public bool flip(uint index);
 
         /// Returns a new `BitMask` with the lowest bit removed.
         // #[inline]
         // #[must_use]
-        public abstract IBitMask remove_lowest_bit();
+        public IBitMask remove_lowest_bit();
 
         /// Returns whether the `BitMask` has at least one set bit.
         // #[inline]
-        public abstract bool any_bit_set();
+        public bool any_bit_set();
 
         /// Returns the first set bit in the `BitMask`, if there is one.
         // #[inline]
-        public abstract int? lowest_set_bit();
+        public int? lowest_set_bit();
 
         /// Returns the first set bit in the `BitMask`, if there is one. The
         /// bitmask must not be empty.
         // #[inline]
         // #[cfg(feature = "nightly")]
-        public abstract int lowest_set_bit_nonzero();
+        public int lowest_set_bit_nonzero();
 
-    // // #[inline]
-    // // #[cfg(not(feature = "nightly"))]
-    // public abstract uint lowest_set_bit_nonzero();
+        // // #[inline]
+        // // #[cfg(not(feature = "nightly"))]
+        // public abstract uint lowest_set_bit_nonzero();
 
         /// Returns the number of trailing zeroes in the `BitMask`.
         // #[inline]
-        public abstract int trailing_zeros();
+        public int trailing_zeros();
 
         /// Returns the number of leading zeroes in the `BitMask`.
         // #[inline]
-        public abstract int leading_zeros();
+        public int leading_zeros();
     }
 }

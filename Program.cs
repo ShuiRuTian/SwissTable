@@ -8,7 +8,6 @@ namespace SwissTable
         static void Main(string[] args)
         {
             var tmp = int.MaxValue;
-            tmp.
             unchecked
             {
                 var tmp2 = tmp * 8 / 7;
