@@ -2,7 +2,7 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "build",
+            "label": "build debug",
             "command": "dotnet",
             "type": "process",
             "args": [
@@ -10,6 +10,20 @@
                 "${workspaceFolder}/SwissTable.csproj",
                 "/property:GenerateFullPaths=true",
                 "/consoleloggerparameters:NoSummary"
+            ],
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "build release",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "build",
+                "${workspaceFolder}/SwissTable.csproj",
+                "/property:GenerateFullPaths=true",
+                "/consoleloggerparameters:NoSummary",
+                "-c",
+                "Release"
             ],
             "problemMatcher": "$msCompile"
         },
@@ -32,9 +46,8 @@
             "args": [
                 "watch",
                 "run",
-                "${workspaceFolder}/SwissTable.csproj",
-                "/property:GenerateFullPaths=true",
-                "/consoleloggerparameters:NoSummary"
+                "--project",
+                "${workspaceFolder}/SwissTable.csproj"
             ],
             "problemMatcher": "$msCompile"
         }
