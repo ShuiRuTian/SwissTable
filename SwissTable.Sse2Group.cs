@@ -9,6 +9,7 @@ namespace System.Collections.Generic
         struct Sse2BitMask : IBitMask
         {
             // 128 / 8 = 16, so choose ushort
+            // Or maybe we could use `int` with only lowset 16 bits and some trick?
             ushort _data;
 
             internal Sse2BitMask(ushort data)
@@ -42,7 +43,10 @@ namespace System.Collections.Generic
 
             public int leading_zeros()
             {
-                return MostSignificantBit(this._data);
+                Debug.Assert(this._data is ushort);
+                // Notice this maigc number `16`, it is calcualted by the length of type of `LeadingZeroCount`(uint, so 32) and Groud::width(16 for this struct)
+                // So it is 32 - 16 = 16
+                return Numerics.BitOperations.LeadingZeroCount(this._data) - 16;
             }
 
             public int? lowest_set_bit()
@@ -69,43 +73,8 @@ namespace System.Collections.Generic
 
             public int trailing_zeros()
             {
-                return LeastSignificantBit(this._data);
+                return Numerics.BitOperations.TrailingZeroCount(this._data);
             }
-
-            #region Helper
-            private static int LeastSignificantBit(ushort Arg)
-            {
-                int RetVal = 15;
-                if ((Arg & 0x00ff) != 0) { RetVal -= 8; Arg &= 0x00ff; }
-                if ((Arg & 0x0f0f) != 0) { RetVal -= 4; Arg &= 0x0f0f; }
-                if ((Arg & 0x3333) != 0) { RetVal -= 2; Arg &= 0x3333; }
-                if ((Arg & 0x5555) != 0) RetVal -= 1;
-                return RetVal;
-            }
-
-            private static int LeastSignificantBit2(ushort Arg)
-            {
-                var tmp = (short)Arg;
-                var num = tmp & ~(-tmp);
-                num |= num << 1;
-                num |= num << 2;
-                num |= num << 4;
-                num |= num << 8;
-                num |= num << 16;
-                return ~num;
-            }
-
-            private static int MostSignificantBit(ushort Arg)
-            {
-                int RetVal = 0;
-                if ((Arg & 0xff00) != 0) { RetVal += 8; Arg &= 0xff00; }
-                if ((Arg & 0xf0f0) != 0) { RetVal += 4; Arg &= 0xf0f0; }
-                if ((Arg & 0xcccc) != 0) { RetVal += 2; Arg &= 0xcccc; }
-                if ((Arg & 0xaaaa) != 0) RetVal += 1;
-                return RetVal;
-            }
-
-            #endregion
         }
 
         /// <summary>

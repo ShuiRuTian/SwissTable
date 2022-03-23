@@ -10,8 +10,8 @@ namespace System.Collections.Generic
     [TypeForwardedFrom("System.Core, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")]
     public partial class MyDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IDictionary, IReadOnlyDictionary<TKey, TValue>, ISerializable, IDeserializationCallback where TKey : notnull
     {
-        private static ITriviaInfo _groupInfo = new Sse2TriviaInfo();
-        private static IGroup _group = new Sse2Group();
+        private static readonly ITriviaInfo _groupInfo = new Sse2TriviaInfo();
+        private static readonly IGroup _group = new Sse2Group();
 
         public int Count => throw new NotImplementedException();
 
@@ -19,8 +19,10 @@ namespace System.Collections.Generic
 
         private IEqualityComparer<TKey>? _comparer;
 
-
-        // TODO: maybe we could allocate these two parts together.
+        // The real space that the swisstable allocated
+        // always be the power of 2
+        // This means the upper bound is not Int32.MaxValue(0x7FFFF_FFFF), but 0x4000_0000
+        // This is hard(impossible?) to be larger, for the length of array is limited to 0x7FFFF_FFFF
         private int _capacity => _entries.Length;
         private int _bucket_mask => _capacity - 1;
         private int num_ctrl_bytes => _entries.Length + _groupInfo.WIDTH;
@@ -31,7 +33,6 @@ namespace System.Collections.Generic
         private int _growth_left;
         // number of actual values stored in the map
         private int _count = 0;
-
 
         // Control byte value for an empty bucket.
         private const byte EMPTY = 0b1111_1111;
@@ -202,7 +203,7 @@ namespace System.Collections.Generic
         {
             if (key == null)
             {
-                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+                // ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
             }
 
             if (_entries == null)
@@ -226,7 +227,7 @@ namespace System.Collections.Generic
 
                 if (behavior == InsertionBehavior.ThrowOnExisting)
                 {
-                    ThrowHelper.ThrowAddingDuplicateWithKeyArgumentException(key);
+                    // ThrowHelper.ThrowAddingDuplicateWithKeyArgumentException(key);
                 }
                 return false;
             }
@@ -239,7 +240,7 @@ namespace System.Collections.Generic
             var old_ctrl = _controls[index];
             if (_growth_left == 0 && special_is_empty(old_ctrl))
             {
-                self.reserve(1, hasher);
+                this.reserve(1, hasher);
                 index = find_insert_slot(hashCode);
             }
             record_item_insert_at(index, old_ctrl, hashCode);
@@ -337,11 +338,18 @@ namespace System.Collections.Generic
             var hash = (comparer == null) ? key.GetHashCode() : comparer.GetHashCode(key);
             return hash;
         }
-        internal unsafe ref TValue FindValue(TKey key)
+
+        internal ref TValue FindValue(TKey key)
+        {
+            ref Entry bucket = ref FindBucket(key);
+            return ref bucket.value;
+        }
+
+        private unsafe ref Entry FindBucket(TKey key)
         {
             if (key == null)
             {
-                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+                // ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
             }
             Debug.Assert(_entries != null, "expected entries to be != null");
 
@@ -358,19 +366,19 @@ namespace System.Collections.Generic
                     // TODO: Iterator and performance, if not influence, iterator would be clearer.
                     while (bitmask.any_bit_set())
                     {
-                        var bit = bitmask.lowest_set_bit().Value;
+                        // there must be set bit
+                        var bit = bitmask.lowest_set_bit()!.Value;
                         bitmask = bitmask.remove_lowest_bit();
                         var index = (probe_seq.pos + bit) & _bucket_mask;
                         entry = ref _entries[index];
                         if (Equal(key, entry.key))
                         {
-                            ref TValue value = ref entry.value;
-                            return ref value;
+                            return ref entry;
                         }
                     }
                     if (group.match_empty().any_bit_set())
                     {
-                        return ref Unsafe.NullRef<TValue>(); ;
+                        return ref Unsafe.NullRef<Entry>(); ;
                     }
                 }
                 probe_seq.move_next(_bucket_mask);
@@ -459,6 +467,9 @@ namespace System.Collections.Generic
         }
 
         // TODO: overflow, what about cap > uint.Max
+        /// Returns the number of buckets needed to hold the given number of items,
+        /// taking the maximum load factor into account.
+        ///
         private int capacity_to_buckets(int cap)
         {
             Debug.Assert(cap >= 0);
@@ -477,7 +488,7 @@ namespace System.Collections.Generic
             //
             // Be careful when modifying this, calculate_layout relies on the
             // overflow check here.
-            var adjusted_cap = cap / 7 * 8;
+            var adjusted_cap = checked(cap * 8 / 7);
 
             // Any overflows will have been caught by the checked_mul. Also, any
             // rounding errors from the division above will be cleaned up by
