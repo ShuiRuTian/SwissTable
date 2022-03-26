@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 
@@ -9,45 +10,64 @@ namespace Benchmarks
     [DisassemblyDiagnoser]
     public class StructInline
     {
-        public interface IA
+        public struct Foo
         {
-            public int Foo();
+            public int a;
+            public int b;
         }
 
-        struct SA : IA
+        public class StructContainer
         {
-            public int Foo() { return 1; }
+            Foo foo;
+
+            public void Update()
+            {
+                this.foo.a += 1;
+                this.foo.b += 1;
+            }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public void Update2()
+            {
+                var tmp = foo;
+                tmp.a += 1;
+                tmp.b += 1;
+            }
         }
 
-        public int VirtualCall_Parent(IA ia)
+        public class NormalContainer
         {
-            return ia.Foo();
-        }
-
-        public int VirtualCall_Generic<T>(T t) where T : IA
-        {
-            return t.Foo();
+            int a;
+            int b;
+            public void Update()
+            {
+                this.a += 1;
+                this.b += 1;
+            }
         }
 
         [Benchmark]
-        public int StructInstanceCall()
+        public StructContainer StructContainerUpdate()
         {
-            var sa = new SA();
-            return sa.Foo();
+            var sc = new StructContainer();
+            sc.Update();
+            return sc;
         }
 
         [Benchmark]
-        public int StructVirtualCallParent()
+        public StructContainer StructContainerUpdate2()
         {
-            var sa = new SA();
-            return VirtualCall_Parent(sa);
+            var sc = new StructContainer();
+            sc.Update2();
+            return sc;
         }
 
         [Benchmark]
-        public int StructVirtualCallGeneric()
+        public NormalContainer NormalContainerUpdate()
         {
-            var sa = new SA();
-            return VirtualCall_Generic(sa);
+            var nc = new NormalContainer();
+            nc.Update();
+            return nc;
         }
 
         public static void Main(string[] args)

@@ -7,7 +7,7 @@ namespace Benchmarks
     /// Pretty interesting. Struct and Class behave differently for interface call and generic restrict call.
     /// Anyway, this proves struct could be inlined for generic restrict call.
     [DisassemblyDiagnoser]
-    public class GenericInline
+    public class InterfaceInline
     {
         public interface IA
         {
@@ -78,7 +78,7 @@ namespace Benchmarks
 
         public static void Main(string[] args)
         {
-            var summary = BenchmarkRunner.Run<GenericInline>();
+            var summary = BenchmarkRunner.Run<InterfaceInline>();
         }
     }
 }

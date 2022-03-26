@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Serialization;
 
@@ -23,8 +24,8 @@ namespace System.Collections.Generic
         // always be the power of 2
         // This means the upper bound is not Int32.MaxValue(0x7FFFF_FFFF), but 0x4000_0000
         // This is hard(impossible?) to be larger, for the length of array is limited to 0x7FFFF_FFFF
-        private int _capacity => _entries.Length;
-        private int _bucket_mask => _capacity - 1;
+        private int _capacity => this._bucket_mask + 1;
+        private int _bucket_mask;
         private int num_ctrl_bytes => _entries.Length + _groupInfo.WIDTH;
         private bool is_empty_singleton => _bucket_mask == 0;
         private byte[] _controls;
@@ -271,6 +272,109 @@ namespace System.Collections.Generic
             Debug.Assert(newSize >= _entries.Length);
         }
 
+        public int EnsureCapacity(int capacity)
+        {
+            if (capacity < 0)
+            {
+                // ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.capacity);
+            }
+
+            int currentCapacity = _entries == null ? 0 : _entries.Length;
+            if (currentCapacity >= capacity)
+            {
+                return currentCapacity;
+            }
+
+            if (_buckets == null)
+            {
+                return Initialize(capacity);
+            }
+
+            int newSize = HashHelpers.GetPrime(capacity);
+            Resize(newSize, forceNewHashCodes: false);
+            return newSize;
+        }
+
+        // additional could not be overflow in our use cases. In fact, we could convert it to capacity!
+        private void reserve_rehash_inner(int additional)
+        {
+            var new_items = _capacity;
+            var full_capacity = bucket_mask_to_capacity(this._bucket_mask);
+            if (new_items <= full_capacity)
+            {
+                // unlike rust, we do not need rehash, for we does not provide a customized hasher
+                // however, I choose to to clear the hash table here
+                this.rehash_in_place();
+            }
+            else
+            {
+                this.resize_inner(new_items > full_capacity ? new_items : full_capacity);
+            }
+        }
+
+        // unlike rust, we do not need rehash, for we does not provide a customized hasher
+        // Instead, this function clean current hashmap, set control byte from delete to empty, and free the reference 
+        private void rehash_in_place()
+        {
+            this.prepare_rehash_in_place();
+            for (int i = 0; i < _capacity; i++)
+            {
+                if (_controls[i] == DELETED)
+                {
+                    _controls[i] = EMPTY;
+                    // FIXME: use RuntimeHelpers.IsReferenceOrContainsReferences<TKey>()
+                    if (!typeof(TValue).IsValueType)
+                    {
+                        _entries[i].value = default!;
+                    }
+                    this._count -= 1;
+                }
+            }
+            this._growth_left = bucket_mask_to_capacity(this._bucket_mask) - this._count;
+            throw new NotImplementedException();
+
+            // At this point, DELETED elements are elements that we haven't
+            // rehashed yet. Find them and re-insert them at their ideal
+            // position.
+            for (int i = 0; i < this._capacity; i++)
+            {
+                if (this._controls[i] != DELETED)
+                {
+                    continue;
+                }
+                var i_p = this._entries[i];
+
+            }
+        }
+
+        // unlike rust, we do not abstract inner table, so the implementation is a bit of different.
+        private void resize_inner(int capacity)
+        {
+            // prepare_resize
+
+
+        }
+
+        unsafe private void prepare_rehash_in_place()
+        {
+            for (int i = 0; i < this._capacity; i += _groupInfo.WIDTH)
+            {
+                fixed (byte* ctrl = &_controls[i])
+                {
+                    var group = _group.load_aligned(ctrl);
+                    group = group.convert_special_to_empty_and_full_to_deleted();
+                    group.store_aligned(ctrl);
+                }
+            }
+            // Fix up the trailing control bytes. See the comments in set_ctrl
+            // for the handling of tables smaller than the group width.
+            int copyCount = _capacity < _groupInfo.WIDTH ? _capacity : _groupInfo.WIDTH;
+            int sourceStartIndex = _capacity < _groupInfo.WIDTH ? _groupInfo.WIDTH : _capacity;
+            var srcSpan = new Span<byte>(_controls, 0, copyCount);
+            var dstSpan = new Span<byte>(_controls, sourceStartIndex, copyCount);
+            srcSpan.CopyTo(dstSpan);
+        }
+
         private int Initialize(int capacity)
         {
             int size = capacity_to_buckets(capacity);
@@ -283,6 +387,31 @@ namespace System.Collections.Generic
             _controls = controls;
 
             return size;
+        }
+
+        /// <summary>
+        /// Creates a new empty hash table without allocating any memory, using the
+        /// given allocator.
+        ///
+        /// In effect this returns a table with exactly 1 bucket. However we can
+        /// leave the data pointer dangling since that bucket is never written to
+        /// due to our load factor forcing us to always have at least 1 free bucket.
+        /// </summary>
+        private void new_in()
+        {
+
+        }
+
+        /// <summary>
+        /// Allocates a new hash table with the given number of buckets.
+        ///
+        /// The control bytes are left uninitialized.
+        /// </summary>
+        // unlike rust, we never cares about out of memory
+        private void new_uninitialized(int buckets)
+        {
+            Debug.Assert(BitOperations.IsPow2(buckets));
+
         }
 
         private unsafe int find_insert_slot(int hash)
