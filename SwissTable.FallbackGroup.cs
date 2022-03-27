@@ -116,7 +116,7 @@ namespace System.Collections.Generic
 
             public byte[] static_empty()
             {
-                return Enumerable.Repeat(DELETED, _groupInfo.WIDTH).ToArray();
+                return Enumerable.Repeat(EMPTY, _groupInfo.WIDTH).ToArray();
             }
 
             public unsafe IGroup load(byte* ptr)

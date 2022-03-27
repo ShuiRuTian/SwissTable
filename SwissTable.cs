@@ -37,9 +37,10 @@ namespace System.Collections.Generic
 
         // Mask to get an index from a hash value. The value is one less than the
         // number of buckets in the table.
-        private int _bucket_mask;
         private int num_ctrl_bytes => _entries.Length + _groupInfo.WIDTH;
         private bool is_empty_singleton => _bucket_mask == 0;
+
+        private int _bucket_mask;
         private byte[] _controls;
         private Entry[]? _entries;
         // Number of elements that can be inserted before we need to grow the table
@@ -104,10 +105,14 @@ namespace System.Collections.Generic
             {
                 // ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.capacity);
             }
-
-            if (capacity > 0)
+            switch (capacity)
             {
-                Initialize(capacity);
+                case < 0:
+                    // ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.capacity);
+                    break;
+                default:
+                    Initialize(capacity);
+                    break;
             }
 
             if (comparer is not null && comparer != EqualityComparer<TKey>.Default) // first check for null to avoid forcing default comparer instantiation unnecessarily
@@ -153,6 +158,8 @@ namespace System.Collections.Generic
 
             AddRange(collection);
         }
+        public bool ContainsKey(TKey key) =>
+            !Unsafe.IsNullRef(ref FindBucket(key));
 
         private void AddRange(IEnumerable<KeyValuePair<TKey, TValue>> collection)
         {
@@ -236,26 +243,30 @@ namespace System.Collections.Generic
             // number of EMPTY slots does not change in this case.
             var index = find_insert_slot(hashCode);
             var old_ctrl = _controls[index];
-            if (_growth_left == 0 && special_is_empty(old_ctrl))
+            if (this._growth_left == 0 && special_is_empty(old_ctrl))
             {
-                // this.reserve();
+                this.EnsureCapacity(this._count + 1);
                 index = find_insert_slot(hashCode);
             }
-
-            // behavior!
-            // if (behavior == InsertionBehavior.OverwriteExisting)
-            // {
-            //     oldValue = value;
-            //     return true;
-            // }
-
-            // if (behavior == InsertionBehavior.ThrowOnExisting)
-            // {
-            //     // ThrowHelper.ThrowAddingDuplicateWithKeyArgumentException(key);
-            // }
-            // return false;
+            if (is_full(old_ctrl))
+            {
+                switch (behavior)
+                {
+                    case InsertionBehavior.OverwriteExisting:
+                        this._entries[index].key = key;
+                        this._entries[index].value = value;
+                        return true;
+                    case InsertionBehavior.ThrowOnExisting:
+                        ThrowHelper.ThrowAddingDuplicateWithKeyArgumentException(key);
+                        break;
+                    case InsertionBehavior.None:
+                        return false;
+                }
+                Debug.Fail("unhandled behavior");
+            }
             record_item_insert_at(index, old_ctrl, hashCode);
-            _entries[index].value = value;
+            this._entries[index].key = key;
+            this._entries[index].value = value;
             return true;
         }
 
@@ -282,6 +293,29 @@ namespace System.Collections.Generic
             Debug.Assert(newSize >= _entries.Length);
         }
 
+        // allocate and initialize when with real capacity
+        // this means we do not want to use any existing data, including resize or use dictionary initialize
+        // `realisticCapacity` is any number
+        private void Initialize(int realisticCapacity)
+        {
+            RawTableInner innerTable;
+            if (realisticCapacity == 0)
+            {
+                innerTable = new_in();
+                this._controls = innerTable._controls;
+                this._entries = innerTable._entries;
+                return;
+            }
+            var idealCapacity = capacity_to_buckets(realisticCapacity);
+            innerTable = new_uninitialized(idealCapacity);
+            Array.Fill(innerTable._controls, EMPTY);
+            this._bucket_mask = innerTable._bucket_mask;
+            this._controls = innerTable._controls;
+            this._entries = innerTable._entries;
+            this._count = innerTable._count;
+            this._growth_left = innerTable._growth_left;
+        }
+
         /// <summary>
         /// Ensures that the dictionary can hold up to 'capacity' entries without any further expansion of its backing storage
         /// </summary>
@@ -292,15 +326,21 @@ namespace System.Collections.Generic
             {
                 // ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.capacity);
             }
-
             int currentCapacity = this._count + this._growth_left;
             if (currentCapacity >= capacity)
             {
                 return currentCapacity;
             }
+            if (this._entries == null)
+            {
+                this.Initialize(capacity);
+            }
+            else
+            {
+                // resize
+            }
 
-            this.reserve_rehash_inner(capacity - this._count);
-            return 1;
+            return this._count;
         }
 
         // additional could not be overflow in our use cases. In fact, we could convert it to capacity!
@@ -384,20 +424,6 @@ namespace System.Collections.Generic
             srcSpan.CopyTo(dstSpan);
         }
 
-        private int Initialize(int capacity)
-        {
-            int size = capacity_to_buckets(capacity);
-            var buckets = new Entry[size];
-            var controls = new byte[size + _groupInfo.WIDTH];
-            _count = 0;
-
-            // Assign member variables after both arrays are allocated to guard against corruption from OOM if second fails.
-            _entries = buckets;
-            _controls = controls;
-
-            return size;
-        }
-
         /// <summary>
         /// Creates a new empty hash table without allocating any memory, using the
         /// given allocator.
@@ -410,12 +436,11 @@ namespace System.Collections.Generic
         {
             // unlike rust, maybe we should convert this to a forever lived array that is allocated with specific value.
             byte[] _controls = _group.static_empty();
-            Entry[] _entries = new Entry[0];
             return new RawTableInner
             {
                 _bucket_mask = 0,
                 _controls = _controls,
-                _entries = _entries,
+                _entries = null,
                 _growth_left = 0,
                 _count = 0
             };
@@ -622,7 +647,7 @@ namespace System.Collections.Generic
         ///
         private int capacity_to_buckets(int cap)
         {
-            Debug.Assert(cap >= 0);
+            Debug.Assert(cap > 0);
 
             // For small tables we require at least 1 empty bucket so that lookups are
             // guaranteed to terminate if an element doesn't exist in the table.
@@ -684,8 +709,10 @@ namespace System.Collections.Generic
         ///
         /// The proof is a simple number theory question: i*(i+1)/2 can walk through the complete residue system of 2n
         /// to prove this, we could prove when `0 <= i <= j < 2n`, `i*(i+1)/2 mod 2n == j*(j+1)/2` iff `i == j`
-        /// if this equal is true, we could have `(i-j)(i+j+1)=4n*k`, k is integer. This is obvious if i!=j, the left part is odd, but right is always even.
-        /// So, the the only chance is i==j. Q.E.D
+        /// sufficient: we could have `(i-j)(i+j+1)=4n*k`, k is integer. It is obvious that if i!=j, the left part is odd, but right is always even.
+        /// So, the the only chance is i==j
+        /// necessary: obvious
+        /// Q.E.D.
         struct ProbeSeq
         {
             public int pos;
