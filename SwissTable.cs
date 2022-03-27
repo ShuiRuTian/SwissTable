@@ -508,7 +508,7 @@ namespace System.Collections.Generic
             }
         }
 
-        private bool Equal(TKey key1, TKey key2)
+        private bool IsKeyEqual(TKey key1, TKey key2)
         {
             // TODO: in Dictionary, this is a complex condition to improve performance, learn from it.
             var comparer = _comparer ?? EqualityComparer<TKey>.Default;
@@ -547,7 +547,7 @@ namespace System.Collections.Generic
                         bitmask = bitmask.remove_lowest_bit();
                         var index = (probe_seq.pos + bit) & _bucket_mask;
                         entry = ref _entries[index];
-                        if (Equal(key, entry.key))
+                        if (IsKeyEqual(key, entry.key))
                         {
                             return ref entry;
                         }
