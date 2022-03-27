@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Serialization;
@@ -248,14 +249,14 @@ namespace System.Collections.Generic
                 this.EnsureCapacity(this._count + 1);
                 index = find_insert_slot(hashCode);
             }
-            // entity is ensured not empty here. 
+            Debug.Assert(_entries != null, "entries should be non-null");
             if (is_full(old_ctrl))
             {
                 switch (behavior)
                 {
                     case InsertionBehavior.OverwriteExisting:
-                        this._entries![index].key = key;
-                        this._entries![index].value = value;
+                        this._entries[index].key = key;
+                        this._entries[index].value = value;
                         return true;
                     case InsertionBehavior.ThrowOnExisting:
                         ThrowHelper.ThrowAddingDuplicateWithKeyArgumentException(key);
@@ -266,8 +267,8 @@ namespace System.Collections.Generic
                 Debug.Fail("unhandled behavior");
             }
             record_item_insert_at(index, old_ctrl, hashCode);
-            this._entries![index].key = key;
-            this._entries![index].value = value;
+            this._entries[index].key = key;
+            this._entries[index].value = value;
             return true;
         }
 
@@ -554,7 +555,55 @@ namespace System.Collections.Generic
                     }
                     if (group.match_empty().any_bit_set())
                     {
-                        return ref Unsafe.NullRef<Entry>(); ;
+                        return ref entry;
+                    }
+                }
+                probe_seq.move_next(_bucket_mask);
+            }
+            // TODO: or maybe just
+            // var index1 = this.FindBucketIndex(key);
+            // ref Entry res = ref Unsafe.NullRef<Entry>();
+            // if (index1.HasValue)
+            // {
+            //     res = ref this._entries[index1.Value];
+            // }
+            // return ref res;
+        }
+
+        private unsafe int? FindBucketIndex(TKey key)
+        {
+            if (key == null)
+            {
+                // ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+            }
+            Debug.Assert(_entries != null, "expected entries to be != null");
+
+            var hash = GetHashCodeOfKey(key);
+            var h2_hash = h2(hash);
+            var probe_seq = new ProbeSeq(hash, _bucket_mask);
+            ref Entry entry = ref Unsafe.NullRef<Entry>();
+            while (true)
+            {
+                fixed (byte* ptr = &_controls[probe_seq.pos])
+                {
+                    var group = _group.load(ptr);
+                    var bitmask = group.match_byte(h2_hash);
+                    // TODO: Iterator and performance, if not influence, iterator would be clearer.
+                    while (bitmask.any_bit_set())
+                    {
+                        // there must be set bit
+                        var bit = bitmask.lowest_set_bit()!.Value;
+                        bitmask = bitmask.remove_lowest_bit();
+                        var index = (probe_seq.pos + bit) & _bucket_mask;
+                        entry = ref _entries[index];
+                        if (IsKeyEqual(key, entry.key))
+                        {
+                            return index;
+                        }
+                    }
+                    if (group.match_empty().any_bit_set())
+                    {
+                        return null;
                     }
                 }
                 probe_seq.move_next(_bucket_mask);
@@ -572,12 +621,51 @@ namespace System.Collections.Generic
             _growth_left = bucket_mask_to_capacity(_bucket_mask);
         }
 
-        private unsafe void erase(int index)
+        public bool Remove(TKey key)
+        {
+            // TODO: maybe need to duplicate most of code with `Remove(TKey key, out TValue value)` for performance issue, see C# old implementation
+            if (key == null)
+            {
+                // ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+            }
+            if (this._entries != null)
+            {
+                var index = this.FindBucketIndex(key);
+                if (index != null)
+                {
+                    this.erase(index.Value);
+                }
+            }
+            return false;
+        }
+
+        public bool Remove(TKey key, [MaybeNullWhen(false)] out TValue value)
+        {
+            // TODO: maybe need to duplicate most of code with `Remove(TKey key)` for performance issue, see C# old implementation
+            if (key == null)
+            {
+                // ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+            }
+            if (this._entries != null)
+            {
+                var index = this.FindBucketIndex(key);
+                if (index != null)
+                {
+                    value = this.erase(index.Value);
+                    return true;
+                }
+            }
+            value = default;
+            return false;
+        }
+
+        private unsafe TValue erase(int index)
         {
             // Attention, we could not just only set mark to `Deleted` to assume it is deleted, the reference is still here, and GC would not collect it.
             Debug.Assert(is_full(_controls[index]));
+            Debug.Assert(_entries != null, "entries should be non-null");
             int index_before = unchecked((index - _groupInfo.WIDTH)) & _bucket_mask;
-
+            TValue res;
             fixed (byte* ptr_before = &_controls[index_before])
             fixed (byte* ptr = &_controls[index])
             {
@@ -603,12 +691,18 @@ namespace System.Collections.Generic
                 }
                 set_ctrl(index, ctrl);
                 _count -= 1;
+                res = this._entries[index].value;
                 // TODO: maybe we could remove this branch to improve perf. Or maybe CLR has optimised this.
-                if (!typeof(TValue).IsValueType)
+                if (RuntimeHelpers.IsReferenceOrContainsReferences<TKey>())
+                {
+                    this._entries[index].key = default!;
+                }
+                if (RuntimeHelpers.IsReferenceOrContainsReferences<TValue>())
                 {
                     this._entries[index].value = default!;
                 }
             }
+            return res;
         }
 
         private void set_ctrl_h2(int index, int hash)
