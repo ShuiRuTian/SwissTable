@@ -9,10 +9,19 @@ namespace System.Collections.Generic
     [DebuggerDisplay("Count = {Count}")]
     [Serializable]
     [TypeForwardedFrom("System.Core, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")]
-    public partial class MyDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IDictionary, IReadOnlyDictionary<TKey, TValue>, ISerializable, IDeserializationCallback where TKey : notnull
+    public partial class MyDictionary<TKey, TValue> //: IDictionary<TKey, TValue>, IDictionary, IReadOnlyDictionary<TKey, TValue>, ISerializable, IDeserializationCallback where TKey : notnull
     {
         private static readonly ITriviaInfo _groupInfo = new Sse2TriviaInfo();
         private static readonly IGroup _group = new Sse2Group();
+
+        private struct RawTableInner
+        {
+            internal int _bucket_mask;
+            internal byte[] _controls;
+            internal Entry[]? _entries;
+            internal int _growth_left;
+            internal int _count;
+        }
 
         public int Count => throw new NotImplementedException();
 
@@ -24,16 +33,21 @@ namespace System.Collections.Generic
         // always be the power of 2
         // This means the upper bound is not Int32.MaxValue(0x7FFFF_FFFF), but 0x4000_0000
         // This is hard(impossible?) to be larger, for the length of array is limited to 0x7FFFF_FFFF
-        private int _capacity => this._bucket_mask + 1;
+        private int _buckets => this._bucket_mask + 1;
+
+        // Mask to get an index from a hash value. The value is one less than the
+        // number of buckets in the table.
         private int _bucket_mask;
         private int num_ctrl_bytes => _entries.Length + _groupInfo.WIDTH;
         private bool is_empty_singleton => _bucket_mask == 0;
         private byte[] _controls;
         private Entry[]? _entries;
         // Number of elements that can be inserted before we need to grow the table
+        // This need to be calculated individually, for the tombstone("DELETE")
         private int _growth_left;
-        // number of actual values stored in the map
-        private int _count = 0;
+        // number of real values stored in the map
+        // `items` in rust
+        private int _count;
 
         // Control byte value for an empty bucket.
         private const byte EMPTY = 0b1111_1111;
@@ -106,11 +120,11 @@ namespace System.Collections.Generic
             // hash buckets become unbalanced.
             if (typeof(TKey) == typeof(string))
             {
-                IEqualityComparer<string>? stringComparer = NonRandomizedStringEqualityComparer.GetStringComparer(_comparer);
-                if (stringComparer is not null)
-                {
-                    _comparer = (IEqualityComparer<TKey>?)stringComparer;
-                }
+                // IEqualityComparer<string>? stringComparer = NonRandomizedStringEqualityComparer.GetStringComparer(_comparer);
+                // if (stringComparer is not null)
+                // {
+                //     _comparer = (IEqualityComparer<TKey>?)stringComparer;
+                // }
             }
         }
 
@@ -200,40 +214,23 @@ namespace System.Collections.Generic
             Debug.Assert(modified); // If there was an existing key and the Add failed, an exception will already have been thrown.
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private int GetHashCodeOfKey(TKey key)
+        {
+            return (this._comparer == null) ? key.GetHashCode() : this._comparer.GetHashCode(key);
+        }
+
+        /// <summary>
+        /// The real implementation of any public insert behavior
+        /// Do some extra work other than insert
+        /// </summary>
+        /// <param name="key"></param>
+        /// <param name="value"></param>
+        /// <param name="behavior"></param>
+        /// <returns></returns>
         private bool TryInsert(TKey key, TValue value, InsertionBehavior behavior)
         {
-            if (key == null)
-            {
-                // ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
-            }
-
-            if (_entries == null)
-            {
-                Initialize(0);
-            }
-            Debug.Assert(_entries != null);
-
-            Entry[]? entries = _entries;
-            Debug.Assert(entries != null, "expected entries to be non-null");
-
-            ref TValue oldValue = ref FindValue(key);
-
-            if (!Unsafe.IsNullRef(ref oldValue))
-            {
-                if (behavior == InsertionBehavior.OverwriteExisting)
-                {
-                    oldValue = value;
-                    return true;
-                }
-
-                if (behavior == InsertionBehavior.ThrowOnExisting)
-                {
-                    // ThrowHelper.ThrowAddingDuplicateWithKeyArgumentException(key);
-                }
-                return false;
-            }
-
-            var hashCode = GetHashCodeOfKey(key);
+            var hashCode = this.GetHashCodeOfKey(key);
             // We can avoid growing the table once we have reached our load
             // factor if we are replacing a tombstone(Delete). This works since the
             // number of EMPTY slots does not change in this case.
@@ -241,9 +238,22 @@ namespace System.Collections.Generic
             var old_ctrl = _controls[index];
             if (_growth_left == 0 && special_is_empty(old_ctrl))
             {
-                this.reserve(1, hasher);
+                // this.reserve();
                 index = find_insert_slot(hashCode);
             }
+
+            // behavior!
+            // if (behavior == InsertionBehavior.OverwriteExisting)
+            // {
+            //     oldValue = value;
+            //     return true;
+            // }
+
+            // if (behavior == InsertionBehavior.ThrowOnExisting)
+            // {
+            //     // ThrowHelper.ThrowAddingDuplicateWithKeyArgumentException(key);
+            // }
+            // return false;
             record_item_insert_at(index, old_ctrl, hashCode);
             _entries[index].value = value;
             return true;
@@ -251,9 +261,9 @@ namespace System.Collections.Generic
 
         private void record_item_insert_at(int index, byte old_ctrl, int hash)
         {
-            _growth_left -= special_is_empty(old_ctrl) ? 1 : 0;
+            this._growth_left -= special_is_empty(old_ctrl) ? 1 : 0;
             set_ctrl_h2(index, hash);
-            _count += 1;
+            this._count += 1;
         }
 
         private struct Entry
@@ -272,38 +282,34 @@ namespace System.Collections.Generic
             Debug.Assert(newSize >= _entries.Length);
         }
 
+        /// <summary>
+        /// Ensures that the dictionary can hold up to 'capacity' entries without any further expansion of its backing storage
+        /// </summary>
         public int EnsureCapacity(int capacity)
         {
+            // "capacity" is `this._count + this._growth_left` in the new implementation
             if (capacity < 0)
             {
                 // ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.capacity);
             }
 
-            int currentCapacity = _entries == null ? 0 : _entries.Length;
+            int currentCapacity = this._count + this._growth_left;
             if (currentCapacity >= capacity)
             {
                 return currentCapacity;
             }
 
-            if (_buckets == null)
-            {
-                return Initialize(capacity);
-            }
-
-            int newSize = HashHelpers.GetPrime(capacity);
-            Resize(newSize, forceNewHashCodes: false);
-            return newSize;
+            this.reserve_rehash_inner(capacity - this._count);
+            return 1;
         }
 
         // additional could not be overflow in our use cases. In fact, we could convert it to capacity!
         private void reserve_rehash_inner(int additional)
         {
-            var new_items = _capacity;
+            var new_items = _buckets;
             var full_capacity = bucket_mask_to_capacity(this._bucket_mask);
-            if (new_items <= full_capacity)
+            if (new_items <= full_capacity / 2)
             {
-                // unlike rust, we do not need rehash, for we does not provide a customized hasher
-                // however, I choose to to clear the hash table here
                 this.rehash_in_place();
             }
             else
@@ -317,7 +323,7 @@ namespace System.Collections.Generic
         private void rehash_in_place()
         {
             this.prepare_rehash_in_place();
-            for (int i = 0; i < _capacity; i++)
+            for (int i = 0; i < _buckets; i++)
             {
                 if (_controls[i] == DELETED)
                 {
@@ -336,7 +342,7 @@ namespace System.Collections.Generic
             // At this point, DELETED elements are elements that we haven't
             // rehashed yet. Find them and re-insert them at their ideal
             // position.
-            for (int i = 0; i < this._capacity; i++)
+            for (int i = 0; i < this._buckets; i++)
             {
                 if (this._controls[i] != DELETED)
                 {
@@ -347,17 +353,20 @@ namespace System.Collections.Generic
             }
         }
 
-        // unlike rust, we do not abstract inner table, so the implementation is a bit of different.
         private void resize_inner(int capacity)
         {
-            // prepare_resize
 
 
         }
 
+        private void prepare_resize(int capacity)
+        {
+            Debug.Assert(this._count <= capacity);
+        }
+
         unsafe private void prepare_rehash_in_place()
         {
-            for (int i = 0; i < this._capacity; i += _groupInfo.WIDTH)
+            for (int i = 0; i < this._buckets; i += _groupInfo.WIDTH)
             {
                 fixed (byte* ctrl = &_controls[i])
                 {
@@ -368,8 +377,8 @@ namespace System.Collections.Generic
             }
             // Fix up the trailing control bytes. See the comments in set_ctrl
             // for the handling of tables smaller than the group width.
-            int copyCount = _capacity < _groupInfo.WIDTH ? _capacity : _groupInfo.WIDTH;
-            int sourceStartIndex = _capacity < _groupInfo.WIDTH ? _groupInfo.WIDTH : _capacity;
+            int copyCount = _buckets < _groupInfo.WIDTH ? _buckets : _groupInfo.WIDTH;
+            int sourceStartIndex = _buckets < _groupInfo.WIDTH ? _groupInfo.WIDTH : _buckets;
             var srcSpan = new Span<byte>(_controls, 0, copyCount);
             var dstSpan = new Span<byte>(_controls, sourceStartIndex, copyCount);
             srcSpan.CopyTo(dstSpan);
@@ -397,9 +406,19 @@ namespace System.Collections.Generic
         /// leave the data pointer dangling since that bucket is never written to
         /// due to our load factor forcing us to always have at least 1 free bucket.
         /// </summary>
-        private void new_in()
+        private RawTableInner new_in()
         {
-
+            // unlike rust, maybe we should convert this to a forever lived array that is allocated with specific value.
+            byte[] _controls = _group.static_empty();
+            Entry[] _entries = new Entry[0];
+            return new RawTableInner
+            {
+                _bucket_mask = 0,
+                _controls = _controls,
+                _entries = _entries,
+                _growth_left = 0,
+                _count = 0
+            };
         }
 
         /// <summary>
@@ -408,10 +427,19 @@ namespace System.Collections.Generic
         /// The control bytes are left uninitialized.
         /// </summary>
         // unlike rust, we never cares about out of memory
-        private void new_uninitialized(int buckets)
+        private RawTableInner new_uninitialized(int buckets)
         {
             Debug.Assert(BitOperations.IsPow2(buckets));
-
+            byte[] _controls = new byte[buckets + _groupInfo.WIDTH];
+            Entry[] _entries = new Entry[buckets];
+            return new RawTableInner
+            {
+                _bucket_mask = buckets - 1,
+                _controls = _controls,
+                _entries = _entries,
+                _growth_left = bucket_mask_to_capacity(buckets - 1),
+                _count = 0
+            };
         }
 
         private unsafe int find_insert_slot(int hash)
@@ -459,13 +487,6 @@ namespace System.Collections.Generic
             // TODO: in Dictionary, this is a complex condition to improve performance, learn from it.
             var comparer = _comparer ?? EqualityComparer<TKey>.Default;
             return comparer.Equals(key1, key2);
-        }
-
-        private int GetHashCodeOfKey(TKey key)
-        {
-            IEqualityComparer<TKey>? comparer = _comparer;
-            var hash = (comparer == null) ? key.GetHashCode() : comparer.GetHashCode(key);
-            return hash;
         }
 
         internal ref TValue FindValue(TKey key)

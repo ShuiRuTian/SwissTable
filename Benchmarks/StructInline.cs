@@ -29,7 +29,7 @@ namespace Benchmarks
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public void Update2()
             {
-                var tmp = foo;
+                ref var tmp = ref foo;
                 tmp.a += 1;
                 tmp.b += 1;
             }

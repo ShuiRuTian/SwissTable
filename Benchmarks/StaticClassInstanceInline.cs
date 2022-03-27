@@ -12,6 +12,7 @@ namespace Benchmarks
         public interface IGroupInfo
         {
             public int WIDTH { get; }
+            public nuint BITMASK_MASK { get; }
         }
 
         class Sse2GroupInfo : IGroupInfo
@@ -22,22 +23,22 @@ namespace Benchmarks
             // mem::align_of::<Self>() in rust.
             public const uint ALIGN_WIDTH = 128 / 8;
             public const uint BITMASK_STRIDE = 1;
-            public const ushort BITMASK_MASK = 0xffff;
+            public nuint BITMASK_MASK => unchecked((nuint)0x8080_8080_8080_8080);
         }
 
         private static IGroupInfo _groupInfo = new Sse2GroupInfo();
         private static readonly IGroupInfo _groupInfo2 = new Sse2GroupInfo();
 
         [Benchmark]
-        public int StaticInline()
+        public nuint StaticInline()
         {
-            return _groupInfo.WIDTH;
+            return _groupInfo.BITMASK_MASK;
         }
 
         [Benchmark]
-        public int StaticReadonlyInline()
+        public nuint StaticReadonlyInline()
         {
-            return _groupInfo2.WIDTH;
+            return _groupInfo2.BITMASK_MASK;
         }
 
         public static void Main(string[] args)
