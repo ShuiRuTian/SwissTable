@@ -248,13 +248,14 @@ namespace System.Collections.Generic
                 this.EnsureCapacity(this._count + 1);
                 index = find_insert_slot(hashCode);
             }
+            // entity is ensured not empty here. 
             if (is_full(old_ctrl))
             {
                 switch (behavior)
                 {
                     case InsertionBehavior.OverwriteExisting:
-                        this._entries[index].key = key;
-                        this._entries[index].value = value;
+                        this._entries![index].key = key;
+                        this._entries![index].value = value;
                         return true;
                     case InsertionBehavior.ThrowOnExisting:
                         ThrowHelper.ThrowAddingDuplicateWithKeyArgumentException(key);
@@ -265,8 +266,8 @@ namespace System.Collections.Generic
                 Debug.Fail("unhandled behavior");
             }
             record_item_insert_at(index, old_ctrl, hashCode);
-            this._entries[index].key = key;
-            this._entries[index].value = value;
+            this._entries![index].key = key;
+            this._entries![index].value = value;
             return true;
         }
 
