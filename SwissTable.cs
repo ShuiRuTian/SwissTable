@@ -574,13 +574,9 @@ namespace System.Collections.Generic
 
         private unsafe void erase(int index)
         {
-            // TODO: Attention, in language like c#, we could not just only set mark to Delete to assume it is deleted, the reference is still here, and GC would not collect it.
+            // Attention, we could not just only set mark to `Deleted` to assume it is deleted, the reference is still here, and GC would not collect it.
             Debug.Assert(is_full(_controls[index]));
-            int index_before;
-            unchecked
-            {
-                index_before = (index - _groupInfo.WIDTH) & _bucket_mask;
-            }
+            int index_before = unchecked((index - _groupInfo.WIDTH)) & _bucket_mask;
 
             fixed (byte* ptr_before = &_controls[index_before])
             fixed (byte* ptr = &_controls[index])
@@ -607,6 +603,11 @@ namespace System.Collections.Generic
                 }
                 set_ctrl(index, ctrl);
                 _count -= 1;
+                // TODO: maybe we could remove this branch to improve perf. Or maybe CLR has optimised this.
+                if (!typeof(TValue).IsValueType)
+                {
+                    this._entries[index].value = default!;
+                }
             }
         }
 

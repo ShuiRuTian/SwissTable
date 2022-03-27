@@ -11,6 +11,9 @@ it is well-documentated, however, like C and C++, it prefers abbr. We should try
 
 ### difference
 
+#### Find
+Find bucket to insert and find bucket with specific key is differnt.
+
 #### grow when Insert
 > When calling "constructor", both implementations choose to not allocate memory unless it is necessary
 C#:
