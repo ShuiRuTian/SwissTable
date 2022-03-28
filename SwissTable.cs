@@ -10,7 +10,7 @@ namespace System.Collections.Generic
     [DebuggerDisplay("Count = {Count}")]
     [Serializable]
     [TypeForwardedFrom("System.Core, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")]
-    public partial class MyDictionary<TKey, TValue> //: IDictionary<TKey, TValue>, IDictionary, IReadOnlyDictionary<TKey, TValue>, ISerializable, IDeserializationCallback where TKey : notnull
+    public partial class MyDictionary<TKey, TValue> : IDictionary<TKey, TValue> //, IDictionary, IReadOnlyDictionary<TKey, TValue>, ISerializable, IDeserializationCallback where TKey : notnull
     {
         private static readonly ITriviaInfo _groupInfo = new Sse2TriviaInfo();
         private static readonly IGroup _group = new Sse2Group();
@@ -27,6 +27,10 @@ namespace System.Collections.Generic
         public int Count => throw new NotImplementedException();
 
         public bool IsReadOnly => false;
+
+        // each add/remove will add one version
+        // For Enumerator, if version is changed, one error will be thrown for enumerator should not changed.
+        private readonly int _version;
 
         private IEqualityComparer<TKey>? _comparer;
 
@@ -104,12 +108,12 @@ namespace System.Collections.Generic
         {
             if (capacity < 0)
             {
-                // ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.capacity);
+                ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.capacity);
             }
             switch (capacity)
             {
                 case < 0:
-                    // ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.capacity);
+                    ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.capacity);
                     break;
                 default:
                     Initialize(capacity);
@@ -141,7 +145,7 @@ namespace System.Collections.Generic
         {
             if (dictionary == null)
             {
-                // ThrowHelper.ThrowArgumentNullException(ExceptionArgument.dictionary);
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.dictionary);
             }
 
             AddRange(dictionary);
@@ -154,13 +158,11 @@ namespace System.Collections.Generic
         {
             if (collection == null)
             {
-                // ThrowHelper.ThrowArgumentNullException(ExceptionArgument.collection);
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.collection);
             }
 
             AddRange(collection);
         }
-        public bool ContainsKey(TKey key) =>
-            !Unsafe.IsNullRef(ref FindBucket(key));
 
         private void AddRange(IEnumerable<KeyValuePair<TKey, TValue>> collection)
         {
@@ -216,11 +218,116 @@ namespace System.Collections.Generic
             }
         }
 
+        public bool Remove(TKey key, [MaybeNullWhen(false)] out TValue value)
+        {
+            // TODO: maybe need to duplicate most of code with `Remove(TKey key)` for performance issue, see C# old implementation
+            if (key == null)
+            {
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+            }
+            if (this._entries != null)
+            {
+                var index = this.FindBucketIndex(key);
+                if (index != null)
+                {
+                    value = this.erase(index.Value);
+                    return true;
+                }
+            }
+            value = default;
+            return false;
+        }
+
+        #region IDictionary<TKey, TValue>
+        TValue IDictionary<TKey, TValue>.this[TKey key] { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+
+        ICollection<TKey> IDictionary<TKey, TValue>.Keys => throw new NotImplementedException();
+
+        ICollection<TValue> IDictionary<TKey, TValue>.Values => throw new NotImplementedException();
+
         public void Add(TKey key, TValue value)
         {
             bool modified = TryInsert(key, value, InsertionBehavior.ThrowOnExisting);
             Debug.Assert(modified); // If there was an existing key and the Add failed, an exception will already have been thrown.
         }
+
+        public bool ContainsKey(TKey key) =>
+            !Unsafe.IsNullRef(ref FindBucket(key));
+
+        public bool ContainsValue(TValue value)
+        {
+            // TODO: "inline" to get better performance
+            foreach (var item in new ValueCollection(this))
+            {
+                if (EqualityComparer<TValue>.Default.Equals(item, value))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public bool Remove(TKey key)
+        {
+            // TODO: maybe need to duplicate most of code with `Remove(TKey key, out TValue value)` for performance issue, see C# old implementation
+            if (key == null)
+            {
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+            }
+            if (this._entries != null)
+            {
+                var index = this.FindBucketIndex(key);
+                if (index != null)
+                {
+                    this.erase(index.Value);
+                }
+            }
+            return false;
+        }
+
+        bool IDictionary<TKey, TValue>.TryGetValue(TKey key, out TValue value)
+        {
+            throw new NotImplementedException();
+        }
+        #endregion
+
+        #region ICollection<KeyValuePair<TKey, TValue>>
+        void ICollection<KeyValuePair<TKey, TValue>>.Add(KeyValuePair<TKey, TValue> item)
+        {
+            throw new NotImplementedException();
+        }
+
+        void ICollection<KeyValuePair<TKey, TValue>>.Clear()
+        {
+            throw new NotImplementedException();
+        }
+
+        bool ICollection<KeyValuePair<TKey, TValue>>.Contains(KeyValuePair<TKey, TValue> item)
+        {
+            throw new NotImplementedException();
+        }
+
+        void ICollection<KeyValuePair<TKey, TValue>>.CopyTo(KeyValuePair<TKey, TValue>[] array, int arrayIndex)
+        {
+            throw new NotImplementedException();
+        }
+
+        bool ICollection<KeyValuePair<TKey, TValue>>.Remove(KeyValuePair<TKey, TValue> item)
+        {
+            throw new NotImplementedException();
+        }
+        #endregion
+
+        #region IEnumerable<KeyValuePair<TKey, TValue>>
+        IEnumerator<KeyValuePair<TKey, TValue>> IEnumerable<KeyValuePair<TKey, TValue>>.GetEnumerator() =>
+            new Enumerator(this, Enumerator.KeyValuePair);
+        #endregion
+
+        #region IEnumerable
+        IEnumerator IEnumerable.GetEnumerator() => new Enumerator(this, Enumerator.KeyValuePair);
+        #endregion
+
+        public Enumerator GetEnumerator() => new Enumerator(this, Enumerator.KeyValuePair);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private int GetHashCodeOfKey(TKey key)
@@ -326,7 +433,7 @@ namespace System.Collections.Generic
             // "capacity" is `this._count + this._growth_left` in the new implementation
             if (capacity < 0)
             {
-                // ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.capacity);
+                ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.capacity);
             }
             int currentCapacity = this._count + this._growth_left;
             if (currentCapacity >= capacity)
@@ -526,7 +633,7 @@ namespace System.Collections.Generic
         {
             if (key == null)
             {
-                // ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
             }
             Debug.Assert(_entries != null, "expected entries to be != null");
 
@@ -574,7 +681,7 @@ namespace System.Collections.Generic
         {
             if (key == null)
             {
-                // ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
             }
             Debug.Assert(_entries != null, "expected entries to be != null");
 
@@ -621,43 +728,7 @@ namespace System.Collections.Generic
             _growth_left = bucket_mask_to_capacity(_bucket_mask);
         }
 
-        public bool Remove(TKey key)
-        {
-            // TODO: maybe need to duplicate most of code with `Remove(TKey key, out TValue value)` for performance issue, see C# old implementation
-            if (key == null)
-            {
-                // ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
-            }
-            if (this._entries != null)
-            {
-                var index = this.FindBucketIndex(key);
-                if (index != null)
-                {
-                    this.erase(index.Value);
-                }
-            }
-            return false;
-        }
 
-        public bool Remove(TKey key, [MaybeNullWhen(false)] out TValue value)
-        {
-            // TODO: maybe need to duplicate most of code with `Remove(TKey key)` for performance issue, see C# old implementation
-            if (key == null)
-            {
-                // ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
-            }
-            if (this._entries != null)
-            {
-                var index = this.FindBucketIndex(key);
-                if (index != null)
-                {
-                    value = this.erase(index.Value);
-                    return true;
-                }
-            }
-            value = default;
-            return false;
-        }
 
         private unsafe TValue erase(int index)
         {
@@ -825,6 +896,574 @@ namespace System.Collections.Generic
                 this.stride += _groupInfo.WIDTH;
                 this.pos += this.stride;
                 this.pos &= bucket_mask;
+            }
+        }
+
+        public struct Enumerator : IEnumerator<KeyValuePair<TKey, TValue>>, IDictionaryEnumerator
+        {
+            private readonly MyDictionary<TKey, TValue> _dictionary;
+            private readonly int _version;
+            private KeyValuePair<TKey, TValue> _current;
+            private IBitMask _currentBitMask;
+            private int current_ctrl_offset;
+            private readonly int _getEnumeratorRetType;  // What should Enumerator.Current return?
+            private bool isValid; // valid when _current has correct value.
+            internal const int DictEntry = 1;
+            internal const int KeyValuePair = 2;
+
+            unsafe internal Enumerator(MyDictionary<TKey, TValue> dictionary, int getEnumeratorRetType)
+            {
+                _dictionary = dictionary;
+                _version = dictionary._version;
+                _getEnumeratorRetType = getEnumeratorRetType;
+                _current = default;
+                current_ctrl_offset = 0;
+                isValid = false;
+                fixed (byte* ctrl = &_dictionary._controls[0])
+                {
+                    _currentBitMask = _group.load_aligned(ctrl).match_full();
+                }
+            }
+
+            #region IDictionaryEnumerator
+            DictionaryEntry IDictionaryEnumerator.Entry
+            {
+                get
+                {
+                    if (!isValid)
+                    {
+                        ThrowHelper.ThrowInvalidOperationException_InvalidOperation_EnumOpCantHappen();
+                    }
+                    Debug.Assert(_current.Key != null);
+                    return new DictionaryEntry(_current.Key, _current.Value);
+                }
+            }
+
+            object IDictionaryEnumerator.Key
+            {
+                get
+                {
+                    if (!isValid)
+                    {
+                        ThrowHelper.ThrowInvalidOperationException_InvalidOperation_EnumOpCantHappen();
+                    }
+                    Debug.Assert(_current.Key != null);
+                    return _current.Key;
+                }
+            }
+
+            object? IDictionaryEnumerator.Value
+            {
+                get
+                {
+                    if (!isValid)
+                    {
+                        ThrowHelper.ThrowInvalidOperationException_InvalidOperation_EnumOpCantHappen();
+                    }
+                    return _current.Value;
+                }
+            }
+            #endregion
+
+            #region IEnumerator<KeyValuePair<TKey, TValue>>
+            KeyValuePair<TKey, TValue> IEnumerator<KeyValuePair<TKey, TValue>>.Current => this._current;
+
+            object IEnumerator.Current
+            {
+                get
+                {
+                    if (!isValid)
+                    {
+                        ThrowHelper.ThrowInvalidOperationException_InvalidOperation_EnumOpCantHappen();
+                    }
+
+                    Debug.Assert(_current.Key != null);
+
+                    if (_getEnumeratorRetType == DictEntry)
+                    {
+                        return new DictionaryEntry(_current.Key, _current.Value);
+                    }
+
+                    return new KeyValuePair<TKey, TValue>(_current.Key, _current.Value);
+                }
+            }
+
+            void IDisposable.Dispose() { }
+
+            unsafe public bool MoveNext()
+            {
+                if (_version != _dictionary._version)
+                {
+                    ThrowHelper.ThrowInvalidOperationException_InvalidOperation_EnumFailedVersion();
+                }
+                while (true)
+                {
+                    var lowest_set_bit = this._currentBitMask.lowest_set_bit();
+                    if (lowest_set_bit.HasValue)
+                    {
+                        isValid = true;
+                        this._currentBitMask = this._currentBitMask.remove_lowest_bit();
+                        var entry = this._dictionary._entries[this.current_ctrl_offset + lowest_set_bit.Value];
+                        this._current = new KeyValuePair<TKey, TValue>(entry.key, entry.value);
+                        return true;
+                    }
+                    // Shoudl we use closure here? What about the perf? Would CLR optimise this?
+                    if (this.current_ctrl_offset + _groupInfo.WIDTH >= this._dictionary._buckets)
+                    {
+                        this._current = default;
+                        isValid = false;
+                        return false;
+                    }
+
+                    fixed (byte* ctrl = &_dictionary._controls[current_ctrl_offset])
+                    {
+                        this._currentBitMask = _group.load_aligned(ctrl).match_full();
+                    }
+                    this.current_ctrl_offset += _groupInfo.WIDTH;
+                }
+            }
+            unsafe void IEnumerator.Reset()
+            {
+                if (_version != _dictionary._version)
+                {
+                    ThrowHelper.ThrowInvalidOperationException_InvalidOperation_EnumFailedVersion();
+                }
+
+                _current = default;
+                current_ctrl_offset = 0;
+                isValid = false;
+                fixed (byte* ctrl = &_dictionary._controls[0])
+                {
+                    _currentBitMask = _group.load_aligned(ctrl).match_full();
+                }
+            }
+            #endregion
+        }
+
+        // [DebuggerTypeProxy(typeof(DictionaryKeyCollectionDebugView<,>))]
+        [DebuggerDisplay("Count = {Count}")]
+        public sealed class KeyCollection : ICollection<TKey>, ICollection, IReadOnlyCollection<TKey>
+        {
+            private readonly MyDictionary<TKey, TValue> _dictionary;
+
+            public KeyCollection(MyDictionary<TKey, TValue> dictionary)
+            {
+                if (dictionary == null)
+                {
+                    ThrowHelper.ThrowArgumentNullException(ExceptionArgument.dictionary);
+                }
+
+                _dictionary = dictionary;
+            }
+
+            public Enumerator GetEnumerator() => new Enumerator(_dictionary);
+
+            public void CopyTo(TKey[] array, int index)
+            {
+                if (array == null)
+                {
+                    ThrowHelper.ThrowArgumentNullException(ExceptionArgument.array);
+                }
+
+                Debug.Assert(array != null);
+
+                if (index < 0 || index > array.Length)
+                {
+                    ThrowHelper.ThrowIndexArgumentOutOfRange_NeedNonNegNumException();
+                }
+
+                if (array.Length - index < _dictionary.Count)
+                {
+                    ThrowHelper.ThrowArgumentException(ExceptionResource.Arg_ArrayPlusOffTooSmall);
+                }
+                // TODO: we might also use SIMD to pass through the control bytes, which would provide better performance for spare situation.
+                foreach (var item in this)
+                {
+                    array[index++] = item;
+                }
+            }
+
+            public int Count => _dictionary.Count;
+
+            bool ICollection<TKey>.IsReadOnly => true;
+
+            void ICollection<TKey>.Add(TKey item) =>
+                ThrowHelper.ThrowNotSupportedException(ExceptionResource.NotSupported_KeyCollectionSet);
+
+            void ICollection<TKey>.Clear() =>
+                ThrowHelper.ThrowNotSupportedException(ExceptionResource.NotSupported_KeyCollectionSet);
+
+            bool ICollection<TKey>.Contains(TKey item) =>
+                _dictionary.ContainsKey(item);
+
+            bool ICollection<TKey>.Remove(TKey item)
+            {
+                ThrowHelper.ThrowNotSupportedException(ExceptionResource.NotSupported_KeyCollectionSet);
+                return false;
+            }
+
+            IEnumerator<TKey> IEnumerable<TKey>.GetEnumerator() => new Enumerator(_dictionary);
+
+            IEnumerator IEnumerable.GetEnumerator() => new Enumerator(_dictionary);
+
+            void ICollection.CopyTo(Array array, int index)
+            {
+                if (array == null)
+                {
+                    ThrowHelper.ThrowArgumentNullException(ExceptionArgument.array);
+                }
+
+                if (array.Rank != 1)
+                {
+                    ThrowHelper.ThrowArgumentException(ExceptionResource.Arg_RankMultiDimNotSupported);
+                }
+
+                if (array.GetLowerBound(0) != 0)
+                {
+                    ThrowHelper.ThrowArgumentException(ExceptionResource.Arg_NonZeroLowerBound);
+                }
+
+                if ((uint)index > (uint)array.Length)
+                {
+                    ThrowHelper.ThrowIndexArgumentOutOfRange_NeedNonNegNumException();
+                }
+
+                if (array.Length - index < _dictionary.Count)
+                {
+                    ThrowHelper.ThrowArgumentException(ExceptionResource.Arg_ArrayPlusOffTooSmall);
+                }
+
+                if (array is TKey[] keys)
+                {
+                    CopyTo(keys, index);
+                }
+                else
+                {
+                    object[]? objects = array as object[];
+                    if (objects == null)
+                    {
+                        ThrowHelper.ThrowArgumentException_Argument_InvalidArrayType();
+                    }
+
+                    int count = _dictionary._count;
+                    Entry[]? entries = _dictionary._entries;
+                    try
+                    {
+                        foreach (var item in this)
+                        {
+                            objects[index++] = item;
+                        }
+                    }
+                    catch (ArrayTypeMismatchException)
+                    {
+                        ThrowHelper.ThrowArgumentException_Argument_InvalidArrayType();
+                    }
+                }
+            }
+
+            bool ICollection.IsSynchronized => false;
+
+            object ICollection.SyncRoot => ((ICollection)_dictionary).SyncRoot;
+
+            public struct Enumerator : IEnumerator<TKey>, IEnumerator
+            {
+                private readonly MyDictionary<TKey, TValue> _dictionary;
+                private readonly int _version;
+                private IBitMask _currentBitMask;
+                private int current_ctrl_offset;
+                private bool isValid; // valid when _current has correct value.
+                private TKey? _current;
+
+                unsafe internal Enumerator(MyDictionary<TKey, TValue> dictionary)
+                {
+                    _dictionary = dictionary;
+                    _version = dictionary._version;
+                    _current = default;
+                    current_ctrl_offset = 0;
+                    isValid = false;
+                    fixed (byte* ctrl = &_dictionary._controls[0])
+                    {
+                        _currentBitMask = _group.load_aligned(ctrl).match_full();
+                    }
+                }
+
+                public void Dispose() { }
+
+                unsafe public bool MoveNext()
+                {
+                    if (_version != _dictionary._version)
+                    {
+                        ThrowHelper.ThrowInvalidOperationException_InvalidOperation_EnumFailedVersion();
+                    }
+                    while (true)
+                    {
+                        var lowest_set_bit = this._currentBitMask.lowest_set_bit();
+                        if (lowest_set_bit.HasValue)
+                        {
+                            isValid = true;
+                            this._currentBitMask = this._currentBitMask.remove_lowest_bit();
+                            var entry = this._dictionary._entries[this.current_ctrl_offset + lowest_set_bit.Value];
+                            this._current = entry.key;
+                            return true;
+                        }
+                        // Shoudl we use closure here? What about the perf? Would CLR optimise this?
+                        if (this.current_ctrl_offset + _groupInfo.WIDTH >= this._dictionary._buckets)
+                        {
+                            this._current = default;
+                            isValid = false;
+                            return false;
+                        }
+
+                        fixed (byte* ctrl = &_dictionary._controls[current_ctrl_offset])
+                        {
+                            this._currentBitMask = _group.load_aligned(ctrl).match_full();
+                        }
+                        this.current_ctrl_offset += _groupInfo.WIDTH;
+                    }
+                }
+
+                public TKey Current => _current!;
+
+                object? IEnumerator.Current
+                {
+                    get
+                    {
+                        if (!isValid)
+                        {
+                            ThrowHelper.ThrowInvalidOperationException_InvalidOperation_EnumOpCantHappen();
+                        }
+
+                        return _current;
+                    }
+                }
+
+                unsafe void IEnumerator.Reset()
+                {
+                    if (_version != _dictionary._version)
+                    {
+                        ThrowHelper.ThrowInvalidOperationException_InvalidOperation_EnumFailedVersion();
+                    }
+
+                    _current = default;
+                    current_ctrl_offset = 0;
+                    isValid = false;
+                    fixed (byte* ctrl = &_dictionary._controls[0])
+                    {
+                        _currentBitMask = _group.load_aligned(ctrl).match_full();
+                    }
+                }
+            }
+        }
+
+
+        // [DebuggerTypeProxy(typeof(DictionaryValueCollectionDebugView<,>))]
+        [DebuggerDisplay("Count = {Count}")]
+        public sealed class ValueCollection : ICollection<TValue>, ICollection, IReadOnlyCollection<TValue>
+        {
+            private readonly MyDictionary<TKey, TValue> _dictionary;
+
+            public ValueCollection(MyDictionary<TKey, TValue> dictionary)
+            {
+                if (dictionary == null)
+                {
+                    ThrowHelper.ThrowArgumentNullException(ExceptionArgument.dictionary);
+                }
+
+                _dictionary = dictionary;
+            }
+
+            public Enumerator GetEnumerator() => new Enumerator(_dictionary);
+
+            public void CopyTo(TValue[] array, int index)
+            {
+                if (array == null)
+                {
+                    ThrowHelper.ThrowArgumentNullException(ExceptionArgument.array);
+                }
+
+                if ((uint)index > array.Length)
+                {
+                    ThrowHelper.ThrowIndexArgumentOutOfRange_NeedNonNegNumException();
+                }
+
+                if (array.Length - index < _dictionary.Count)
+                {
+                    ThrowHelper.ThrowArgumentException(ExceptionResource.Arg_ArrayPlusOffTooSmall);
+                }
+
+                foreach (var item in this)
+                {
+                    array[index++] = item;
+                }
+            }
+
+            public int Count => _dictionary.Count;
+
+            bool ICollection<TValue>.IsReadOnly => true;
+
+            void ICollection<TValue>.Add(TValue item) =>
+                ThrowHelper.ThrowNotSupportedException(ExceptionResource.NotSupported_ValueCollectionSet);
+
+            bool ICollection<TValue>.Remove(TValue item)
+            {
+                ThrowHelper.ThrowNotSupportedException(ExceptionResource.NotSupported_ValueCollectionSet);
+                return false;
+            }
+
+            void ICollection<TValue>.Clear() =>
+                ThrowHelper.ThrowNotSupportedException(ExceptionResource.NotSupported_ValueCollectionSet);
+
+            bool ICollection<TValue>.Contains(TValue item) => _dictionary.ContainsValue(item);
+
+            IEnumerator<TValue> IEnumerable<TValue>.GetEnumerator() => new Enumerator(_dictionary);
+
+            IEnumerator IEnumerable.GetEnumerator() => new Enumerator(_dictionary);
+
+            void ICollection.CopyTo(Array array, int index)
+            {
+                if (array == null)
+                {
+                    ThrowHelper.ThrowArgumentNullException(ExceptionArgument.array);
+                }
+
+                if (array.Rank != 1)
+                {
+                    ThrowHelper.ThrowArgumentException(ExceptionResource.Arg_RankMultiDimNotSupported);
+                }
+
+                if (array.GetLowerBound(0) != 0)
+                {
+                    ThrowHelper.ThrowArgumentException(ExceptionResource.Arg_NonZeroLowerBound);
+                }
+
+                if ((uint)index > (uint)array.Length)
+                {
+                    ThrowHelper.ThrowIndexArgumentOutOfRange_NeedNonNegNumException();
+                }
+
+                if (array.Length - index < _dictionary.Count)
+                {
+                    ThrowHelper.ThrowArgumentException(ExceptionResource.Arg_ArrayPlusOffTooSmall);
+                }
+
+                if (array is TValue[] values)
+                {
+                    CopyTo(values, index);
+                }
+                else
+                {
+                    object[]? objects = array as object[];
+
+                    if (objects == null)
+                    {
+                        ThrowHelper.ThrowArgumentException_Argument_InvalidArrayType();
+                    }
+
+                    try
+                    {
+                        foreach (var item in this)
+                        {
+                            objects[index++] = item;
+                        }
+                    }
+                    catch (ArrayTypeMismatchException)
+                    {
+                        ThrowHelper.ThrowArgumentException_Argument_InvalidArrayType();
+                    }
+                }
+            }
+
+            bool ICollection.IsSynchronized => false;
+
+            object ICollection.SyncRoot => ((ICollection)_dictionary).SyncRoot;
+
+            public struct Enumerator : IEnumerator<TValue>, IEnumerator
+            {
+                private readonly MyDictionary<TKey, TValue> _dictionary;
+                private readonly int _version;
+                private IBitMask _currentBitMask;
+                private int current_ctrl_offset;
+                private bool isValid; // valid when _current has correct value.
+                private TValue? _current;
+
+                unsafe internal Enumerator(MyDictionary<TKey, TValue> dictionary)
+                {
+                    _dictionary = dictionary;
+                    _version = dictionary._version;
+                    _current = default;
+                    current_ctrl_offset = 0;
+                    isValid = false;
+                    fixed (byte* ctrl = &_dictionary._controls[0])
+                    {
+                        _currentBitMask = _group.load_aligned(ctrl).match_full();
+                    }
+                }
+
+                public void Dispose() { }
+
+                unsafe public bool MoveNext()
+                {
+                    if (_version != _dictionary._version)
+                    {
+                        ThrowHelper.ThrowInvalidOperationException_InvalidOperation_EnumFailedVersion();
+                    }
+                    while (true)
+                    {
+                        var lowest_set_bit = this._currentBitMask.lowest_set_bit();
+                        if (lowest_set_bit.HasValue)
+                        {
+                            isValid = true;
+                            this._currentBitMask = this._currentBitMask.remove_lowest_bit();
+                            var entry = this._dictionary._entries[this.current_ctrl_offset + lowest_set_bit.Value];
+                            this._current = entry.value;
+                            return true;
+                        }
+                        // Shoudl we use closure here? What about the perf? Would CLR optimise this?
+                        if (this.current_ctrl_offset + _groupInfo.WIDTH >= this._dictionary._buckets)
+                        {
+                            this._current = default;
+                            isValid = false;
+                            return false;
+                        }
+
+                        fixed (byte* ctrl = &_dictionary._controls[current_ctrl_offset])
+                        {
+                            this._currentBitMask = _group.load_aligned(ctrl).match_full();
+                        }
+                        this.current_ctrl_offset += _groupInfo.WIDTH;
+                    }
+                }
+
+                public TValue Current => _current!;
+
+                object? IEnumerator.Current
+                {
+                    get
+                    {
+                        if (!isValid)
+                        {
+                            ThrowHelper.ThrowInvalidOperationException_InvalidOperation_EnumOpCantHappen();
+                        }
+
+                        return _current;
+                    }
+                }
+
+                unsafe void IEnumerator.Reset()
+                {
+                    if (_version != _dictionary._version)
+                    {
+                        ThrowHelper.ThrowInvalidOperationException_InvalidOperation_EnumFailedVersion();
+                    }
+
+                    _current = default;
+                    current_ctrl_offset = 0;
+                    isValid = false;
+                    fixed (byte* ctrl = &_dictionary._controls[0])
+                    {
+                        _currentBitMask = _group.load_aligned(ctrl).match_full();
+                    }
+                }
             }
         }
     }

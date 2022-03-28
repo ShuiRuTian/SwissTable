@@ -1,5 +1,6 @@
 ﻿#define TARGET_64BIT
 using System;
+using System.Collections.Generic;
 
 namespace SwissTable
 {
@@ -7,13 +8,8 @@ namespace SwissTable
     {
         static void Main(string[] args)
         {
-            var tmp = int.MaxValue;
-            unchecked
-            {
-                var tmp2 = tmp * 8 / 7;
-                Console.WriteLine("Hello World!");
-
-            }
+            var tmp = new Dictionary<int, int>();
+            tmp.GetEnumerator();
             Console.WriteLine("Hello World!");
         }
     }
