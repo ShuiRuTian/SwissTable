@@ -10,8 +10,14 @@ namespace System.Collections.Generic
     [DebuggerDisplay("Count = {Count}")]
     [Serializable]
     [TypeForwardedFrom("System.Core, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")]
-    public partial class MyDictionary<TKey, TValue> : IDictionary<TKey, TValue> //, IDictionary, IReadOnlyDictionary<TKey, TValue>, ISerializable, IDeserializationCallback where TKey : notnull
+    public partial class MyDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IDictionary//, IReadOnlyDictionary<TKey, TValue>, ISerializable, IDeserializationCallback where TKey : notnull
     {
+        // Term define:
+        //   Capacity: The maximum number of non-empty items that a hash table can hold before scaling. (come from `EnsureCapacity`)
+        //   count: the real count of stored items
+        //   growth_left: due to the existing of tombstone, non-empty does not mean there is indeed a value.
+        //   bucket: `Entry` in the code, which could hold a key-value pair
+
         private static readonly ITriviaInfo _groupInfo = new Sse2TriviaInfo();
         private static readonly IGroup _group = new Sse2Group();
 
@@ -24,7 +30,7 @@ namespace System.Collections.Generic
             internal int _count;
         }
 
-        public int Count => throw new NotImplementedException();
+        public int Count => this._count;
 
         public bool IsReadOnly => false;
 
@@ -205,7 +211,7 @@ namespace System.Collections.Generic
                     // Only copy if an entry
                     if (is_full(oldCtrls[i]))
                     {
-                        Add(oldEntries[i].key, oldEntries[i].value);
+                        Add(oldEntries[i].Key, oldEntries[i].Value);
                     }
                 }
                 return;
@@ -345,6 +351,24 @@ namespace System.Collections.Generic
         /// <returns></returns>
         private bool TryInsert(TKey key, TValue value, InsertionBehavior behavior)
         {
+            ref var bucket = ref this.FindBucket(key);
+            // replace
+            if (!Unsafe.IsNullRef(ref bucket))
+            {
+                switch (behavior)
+                {
+                    case InsertionBehavior.OverwriteExisting:
+                        bucket.Key = key;
+                        bucket.Value = value;
+                        return true;
+                    case InsertionBehavior.ThrowOnExisting:
+                        ThrowHelper.ThrowAddingDuplicateWithKeyArgumentException(key);
+                        break;
+                    case InsertionBehavior.None:
+                        return false;
+                }
+            }
+            // insert new
             var hashCode = this.GetHashCodeOfKey(key);
             // We can avoid growing the table once we have reached our load
             // factor if we are replacing a tombstone(Delete). This works since the
@@ -356,55 +380,30 @@ namespace System.Collections.Generic
                 this.EnsureCapacity(this._count + 1);
                 index = find_insert_slot(hashCode);
             }
-            Debug.Assert(_entries != null, "entries should be non-null");
-            if (is_full(old_ctrl))
-            {
-                switch (behavior)
-                {
-                    case InsertionBehavior.OverwriteExisting:
-                        this._entries[index].key = key;
-                        this._entries[index].value = value;
-                        return true;
-                    case InsertionBehavior.ThrowOnExisting:
-                        ThrowHelper.ThrowAddingDuplicateWithKeyArgumentException(key);
-                        break;
-                    case InsertionBehavior.None:
-                        return false;
-                }
-                Debug.Fail("unhandled behavior");
-            }
+            Debug.Assert(_entries != null);
             record_item_insert_at(index, old_ctrl, hashCode);
-            this._entries[index].key = key;
-            this._entries[index].value = value;
+            this._entries[index].Key = key;
+            this._entries[index].Value = value;
             return true;
         }
 
         private void record_item_insert_at(int index, byte old_ctrl, int hash)
         {
             this._growth_left -= special_is_empty(old_ctrl) ? 1 : 0;
-            set_ctrl_h2(index, hash);
+            set_ctrl_h2(index, hash, this._controls);
             this._count += 1;
         }
 
         private struct Entry
         {
-            public TKey key;
-            public TValue value;
-        }
-
-
-        // why we need forceNewHashCodes?
-        private void Resize(int newSize, bool forceNewHashCodes)
-        {
-            // Value types never rehash
-            Debug.Assert(!forceNewHashCodes || !typeof(TKey).IsValueType);
-            Debug.Assert(_entries != null, "_buckets should be non-null");
-            Debug.Assert(newSize >= _entries.Length);
+            public TKey Key;
+            public TValue Value;
         }
 
         // allocate and initialize when with real capacity
+        // Note that the _entries might still not allocated
         // this means we do not want to use any existing data, including resize or use dictionary initialize
-        // `realisticCapacity` is any number
+        // `realisticCapacity` is any positive number
         private void Initialize(int realisticCapacity)
         {
             RawTableInner innerTable;
@@ -423,6 +422,39 @@ namespace System.Collections.Generic
             this._entries = innerTable._entries;
             this._count = innerTable._count;
             this._growth_left = innerTable._growth_left;
+        }
+
+        // TODO: check whether we need NonRandomizedStringEqualityComparer
+        // If we need rehash, we should learn from rust.
+        // this function only grow for now.
+        private void Resize(int realisticCapacity)
+        {
+            Debug.Assert(this._entries != null);
+            var idealCapacity = capacity_to_buckets(realisticCapacity);
+            Debug.Assert(idealCapacity >= _entries.Length);
+            var newTable = new_uninitialized(idealCapacity);
+            Debug.Assert(newTable._entries != null);
+            Array.Fill(newTable._controls, EMPTY);
+            newTable._growth_left -= this._count;
+            newTable._count = this._count;
+            // We can use a simpler version of insert() here since:
+            // - there are no DELETED entries.
+            // - we know there is enough space in the table.
+            // - all elements are unique.
+            // TODO: "inline" the foreach for better performance
+            foreach (var item in this)
+            {
+                var hash = this.GetHashCodeOfKey(item.Key);
+                var index = this.find_insert_slot(hash);
+                this.set_ctrl_h2(index, hash, newTable._controls);
+                newTable._entries[index].Key = item.Key;
+                newTable._entries[index].Value = item.Value;
+            }
+            this._bucket_mask = newTable._bucket_mask;
+            this._controls = newTable._controls;
+            this._entries = newTable._entries;
+            this._count = newTable._count;
+            this._growth_left = newTable._growth_left;
         }
 
         /// <summary>
@@ -446,91 +478,10 @@ namespace System.Collections.Generic
             }
             else
             {
-                // resize
+                this.Resize(capacity);
             }
 
-            return this._count;
-        }
-
-        // additional could not be overflow in our use cases. In fact, we could convert it to capacity!
-        private void reserve_rehash_inner(int additional)
-        {
-            var new_items = _buckets;
-            var full_capacity = bucket_mask_to_capacity(this._bucket_mask);
-            if (new_items <= full_capacity / 2)
-            {
-                this.rehash_in_place();
-            }
-            else
-            {
-                this.resize_inner(new_items > full_capacity ? new_items : full_capacity);
-            }
-        }
-
-        // unlike rust, we do not need rehash, for we does not provide a customized hasher
-        // Instead, this function clean current hashmap, set control byte from delete to empty, and free the reference 
-        private void rehash_in_place()
-        {
-            this.prepare_rehash_in_place();
-            for (int i = 0; i < _buckets; i++)
-            {
-                if (_controls[i] == DELETED)
-                {
-                    _controls[i] = EMPTY;
-                    // FIXME: use RuntimeHelpers.IsReferenceOrContainsReferences<TKey>()
-                    if (!typeof(TValue).IsValueType)
-                    {
-                        _entries[i].value = default!;
-                    }
-                    this._count -= 1;
-                }
-            }
-            this._growth_left = bucket_mask_to_capacity(this._bucket_mask) - this._count;
-            throw new NotImplementedException();
-
-            // At this point, DELETED elements are elements that we haven't
-            // rehashed yet. Find them and re-insert them at their ideal
-            // position.
-            for (int i = 0; i < this._buckets; i++)
-            {
-                if (this._controls[i] != DELETED)
-                {
-                    continue;
-                }
-                var i_p = this._entries[i];
-
-            }
-        }
-
-        private void resize_inner(int capacity)
-        {
-
-
-        }
-
-        private void prepare_resize(int capacity)
-        {
-            Debug.Assert(this._count <= capacity);
-        }
-
-        unsafe private void prepare_rehash_in_place()
-        {
-            for (int i = 0; i < this._buckets; i += _groupInfo.WIDTH)
-            {
-                fixed (byte* ctrl = &_controls[i])
-                {
-                    var group = _group.load_aligned(ctrl);
-                    group = group.convert_special_to_empty_and_full_to_deleted();
-                    group.store_aligned(ctrl);
-                }
-            }
-            // Fix up the trailing control bytes. See the comments in set_ctrl
-            // for the handling of tables smaller than the group width.
-            int copyCount = _buckets < _groupInfo.WIDTH ? _buckets : _groupInfo.WIDTH;
-            int sourceStartIndex = _buckets < _groupInfo.WIDTH ? _groupInfo.WIDTH : _buckets;
-            var srcSpan = new Span<byte>(_controls, 0, copyCount);
-            var dstSpan = new Span<byte>(_controls, sourceStartIndex, copyCount);
-            srcSpan.CopyTo(dstSpan);
+            return this._count + this._growth_left;
         }
 
         /// <summary>
@@ -576,6 +527,8 @@ namespace System.Collections.Generic
             };
         }
 
+        // always insert a new one
+        // not check replace, caller should make sure
         private unsafe int find_insert_slot(int hash)
         {
             var probe_seq = new ProbeSeq(hash, _bucket_mask);
@@ -626,7 +579,7 @@ namespace System.Collections.Generic
         internal ref TValue FindValue(TKey key)
         {
             ref Entry bucket = ref FindBucket(key);
-            return ref bucket.value;
+            return ref bucket.Value;
         }
 
         private unsafe ref Entry FindBucket(TKey key)
@@ -655,7 +608,7 @@ namespace System.Collections.Generic
                         bitmask = bitmask.remove_lowest_bit();
                         var index = (probe_seq.pos + bit) & _bucket_mask;
                         entry = ref _entries[index];
-                        if (IsKeyEqual(key, entry.key))
+                        if (IsKeyEqual(key, entry.Key))
                         {
                             return ref entry;
                         }
@@ -703,7 +656,7 @@ namespace System.Collections.Generic
                         bitmask = bitmask.remove_lowest_bit();
                         var index = (probe_seq.pos + bit) & _bucket_mask;
                         entry = ref _entries[index];
-                        if (IsKeyEqual(key, entry.key))
+                        if (IsKeyEqual(key, entry.Key))
                         {
                             return index;
                         }
@@ -727,8 +680,6 @@ namespace System.Collections.Generic
             _count = 0;
             _growth_left = bucket_mask_to_capacity(_bucket_mask);
         }
-
-
 
         private unsafe TValue erase(int index)
         {
@@ -760,30 +711,32 @@ namespace System.Collections.Generic
                     ctrl = EMPTY;
                     _growth_left += 1;
                 }
-                set_ctrl(index, ctrl);
+                set_ctrl(index, ctrl, this._controls);
                 _count -= 1;
-                res = this._entries[index].value;
+                res = this._entries[index].Value;
                 // TODO: maybe we could remove this branch to improve perf. Or maybe CLR has optimised this.
                 if (RuntimeHelpers.IsReferenceOrContainsReferences<TKey>())
                 {
-                    this._entries[index].key = default!;
+                    this._entries[index].Key = default!;
                 }
                 if (RuntimeHelpers.IsReferenceOrContainsReferences<TValue>())
                 {
-                    this._entries[index].value = default!;
+                    this._entries[index].Value = default!;
                 }
             }
             return res;
         }
 
-        private void set_ctrl_h2(int index, int hash)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void set_ctrl_h2(int index, int hash, byte[] controls)
         {
-            set_ctrl(index, h2(hash));
+            set_ctrl(index, h2(hash), controls);
         }
 
         /// Sets a control byte, and possibly also the replicated control byte at
         /// the end of the array.
-        private void set_ctrl(int index, byte ctrl)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void set_ctrl(int index, byte ctrl, byte[] controls)
         {
             // Replicate the first Group::WIDTH control bytes at the end of
             // the array without using a branch:
@@ -804,8 +757,8 @@ namespace System.Collections.Generic
             // | [A] | [B] | [EMPTY] | [EMPTY] | [A] | [B] |
             // ---------------------------------------------
             var index2 = (((index - (_groupInfo.WIDTH))) & _bucket_mask) + _groupInfo.WIDTH;
-            _controls[index] = ctrl;
-            _controls[index2] = ctrl;
+            controls[index] = ctrl;
+            controls[index2] = ctrl;
         }
 
         // TODO: overflow, what about cap > uint.Max
@@ -966,9 +919,9 @@ namespace System.Collections.Generic
             #endregion
 
             #region IEnumerator<KeyValuePair<TKey, TValue>>
-            KeyValuePair<TKey, TValue> IEnumerator<KeyValuePair<TKey, TValue>>.Current => this._current;
+            public KeyValuePair<TKey, TValue> Current => this._current;
 
-            object IEnumerator.Current
+            object? IEnumerator.Current
             {
                 get
                 {
@@ -1004,7 +957,7 @@ namespace System.Collections.Generic
                         isValid = true;
                         this._currentBitMask = this._currentBitMask.remove_lowest_bit();
                         var entry = this._dictionary._entries[this.current_ctrl_offset + lowest_set_bit.Value];
-                        this._current = new KeyValuePair<TKey, TValue>(entry.key, entry.value);
+                        this._current = new KeyValuePair<TKey, TValue>(entry.Key, entry.Value);
                         return true;
                     }
                     // Shoudl we use closure here? What about the perf? Would CLR optimise this?
@@ -1015,11 +968,11 @@ namespace System.Collections.Generic
                         return false;
                     }
 
+                    this.current_ctrl_offset += _groupInfo.WIDTH;
                     fixed (byte* ctrl = &_dictionary._controls[current_ctrl_offset])
                     {
                         this._currentBitMask = _group.load_aligned(ctrl).match_full();
                     }
-                    this.current_ctrl_offset += _groupInfo.WIDTH;
                 }
             }
             unsafe void IEnumerator.Reset()
@@ -1203,7 +1156,7 @@ namespace System.Collections.Generic
                             isValid = true;
                             this._currentBitMask = this._currentBitMask.remove_lowest_bit();
                             var entry = this._dictionary._entries[this.current_ctrl_offset + lowest_set_bit.Value];
-                            this._current = entry.key;
+                            this._current = entry.Key;
                             return true;
                         }
                         // Shoudl we use closure here? What about the perf? Would CLR optimise this?
@@ -1214,11 +1167,11 @@ namespace System.Collections.Generic
                             return false;
                         }
 
+                        this.current_ctrl_offset += _groupInfo.WIDTH;
                         fixed (byte* ctrl = &_dictionary._controls[current_ctrl_offset])
                         {
                             this._currentBitMask = _group.load_aligned(ctrl).match_full();
                         }
-                        this.current_ctrl_offset += _groupInfo.WIDTH;
                     }
                 }
 
@@ -1415,7 +1368,7 @@ namespace System.Collections.Generic
                             isValid = true;
                             this._currentBitMask = this._currentBitMask.remove_lowest_bit();
                             var entry = this._dictionary._entries[this.current_ctrl_offset + lowest_set_bit.Value];
-                            this._current = entry.value;
+                            this._current = entry.Value;
                             return true;
                         }
                         // Shoudl we use closure here? What about the perf? Would CLR optimise this?
@@ -1426,11 +1379,11 @@ namespace System.Collections.Generic
                             return false;
                         }
 
+                        this.current_ctrl_offset += _groupInfo.WIDTH;
                         fixed (byte* ctrl = &_dictionary._controls[current_ctrl_offset])
                         {
                             this._currentBitMask = _group.load_aligned(ctrl).match_full();
                         }
-                        this.current_ctrl_offset += _groupInfo.WIDTH;
                     }
                 }
 

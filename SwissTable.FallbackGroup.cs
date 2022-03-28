@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Linq;
-using System.Numerics;
 using System.Runtime.CompilerServices;
 
 namespace System.Collections.Generic
@@ -20,16 +19,19 @@ namespace System.Collections.Generic
             }
 
             /// Returns a new `BitMask` with all bits inverted.
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public IBitMask invert()
             {
                 return new FallbackBitMask((nuint)(this._data ^ BITMASK_MASK));
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public bool any_bit_set()
             {
                 return this._data != 0;
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public bool flip(uint index)
             {
                 // NOTE: The + BITMASK_STRIDE - 1 is to set the high bit.
@@ -43,6 +45,7 @@ namespace System.Collections.Generic
                 return (this._data & mask) == 0;
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public int leading_zeros()
             {
                 Debug.Assert(this._data is nuint);
@@ -51,6 +54,7 @@ namespace System.Collections.Generic
                 return Numerics.BitOperations.LeadingZeroCount(this._data) - 16;
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public int? lowest_set_bit()
             {
                 if (this._data == 0)
@@ -63,16 +67,19 @@ namespace System.Collections.Generic
                 }
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public int lowest_set_bit_nonzero()
             {
                 return this.trailing_zeros();
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public IBitMask remove_lowest_bit()
             {
                 return new FallbackBitMask((nuint)(this._data & (this._data - 1)));
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public int trailing_zeros()
             {
                 return Numerics.BitOperations.TrailingZeroCount(this._data);
@@ -119,11 +126,13 @@ namespace System.Collections.Generic
                 return Enumerable.Repeat(EMPTY, _groupInfo.WIDTH).ToArray();
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public unsafe IGroup load(byte* ptr)
             {
                 return new FallbackGroup(Unsafe.ReadUnaligned<uint>(ptr));
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public unsafe IGroup load_aligned(byte* ptr)
             {
                 // uint casting is OK, for ALIGN_WIDTH only use low 16 bits now.
@@ -131,6 +140,7 @@ namespace System.Collections.Generic
                 return new FallbackGroup(Unsafe.Read<uint>(ptr));
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public unsafe void store_aligned(byte* ptr)
             {
                 // uint casting is OK, for ALIGN_WIDTH only use low 16 bits now.
@@ -138,6 +148,7 @@ namespace System.Collections.Generic
                 Unsafe.Write(ptr, this._data);
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public IBitMask match_byte(byte b)
             {
                 // This algorithm is derived from
@@ -147,6 +158,7 @@ namespace System.Collections.Generic
                 return new FallbackBitMask(res);
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public IBitMask match_empty()
             {
                 // If the high bit is set, then the byte must be either:
@@ -155,17 +167,20 @@ namespace System.Collections.Generic
                 return new FallbackBitMask(this._data & this._data << 1 & unchecked((nuint)0x8080_8080_8080_8080));
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public IBitMask match_empty_or_deleted()
             {
                 // A byte is EMPTY or DELETED iff the high bit is set
                 return new FallbackBitMask(this._data & unchecked((nuint)0x8080_8080_8080_8080));
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public IBitMask match_full()
             {
                 return this.match_empty_or_deleted().invert();
             }
 
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public IGroup convert_special_to_empty_and_full_to_deleted()
             {
                 // Map high_bit = 1 (EMPTY or DELETED) to 1111_1111
