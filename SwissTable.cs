@@ -18,7 +18,6 @@ namespace System.Collections.Generic
         //   growth_left: due to the existing of tombstone, non-empty does not mean there is indeed a value.
         //   bucket: `Entry` in the code, which could hold a key-value pair
 
-        private static readonly ITriviaInfo _groupInfo = new Sse2TriviaInfo();
         private static readonly IGroup _group = new Sse2Group();
 
         private struct RawTableInner
@@ -637,41 +636,41 @@ namespace System.Collections.Generic
 
         public virtual void OnDeserialization(object? sender)
         {
-            HashHelpers.SerializationInfoTable.TryGetValue(this, out SerializationInfo? siInfo);
-            if (siInfo == null)
-            {
-                // We can return immediately if this function is called twice.
-                // Note we remove the serialization info from the table at the end of this method.
-                return;
-            }
+            // HashHelpers.SerializationInfoTable.TryGetValue(this, out SerializationInfo? siInfo);
+            // if (siInfo == null)
+            // {
+            //     // We can return immediately if this function is called twice.
+            //     // Note we remove the serialization info from the table at the end of this method.
+            //     return;
+            // }
 
-            int realVersion = siInfo.GetInt32(VersionName);
-            int hashsize = siInfo.GetInt32(HashSizeName);
-            _comparer = (IEqualityComparer<TKey>)siInfo.GetValue(ComparerName, typeof(IEqualityComparer<TKey>))!; // When serialized if comparer is null, we use the default.
-            Initialize(hashsize);
+            // int realVersion = siInfo.GetInt32(VersionName);
+            // int hashsize = siInfo.GetInt32(HashSizeName);
+            // _comparer = (IEqualityComparer<TKey>)siInfo.GetValue(ComparerName, typeof(IEqualityComparer<TKey>))!; // When serialized if comparer is null, we use the default.
+            // Initialize(hashsize);
 
-            if (hashsize != 0)
-            {
-                KeyValuePair<TKey, TValue>[]? array = (KeyValuePair<TKey, TValue>[]?)
-                    siInfo.GetValue(KeyValuePairsName, typeof(KeyValuePair<TKey, TValue>[]));
+            // if (hashsize != 0)
+            // {
+            //     KeyValuePair<TKey, TValue>[]? array = (KeyValuePair<TKey, TValue>[]?)
+            //         siInfo.GetValue(KeyValuePairsName, typeof(KeyValuePair<TKey, TValue>[]));
 
-                if (array == null)
-                {
-                    ThrowHelper.ThrowSerializationException(ExceptionResource.Serialization_MissingKeys);
-                }
+            //     if (array == null)
+            //     {
+            //         ThrowHelper.ThrowSerializationException(ExceptionResource.Serialization_MissingKeys);
+            //     }
 
-                for (int i = 0; i < array.Length; i++)
-                {
-                    if (array[i].Key == null)
-                    {
-                        ThrowHelper.ThrowSerializationException(ExceptionResource.Serialization_NullKey);
-                    }
+            //     for (int i = 0; i < array.Length; i++)
+            //     {
+            //         if (array[i].Key == null)
+            //         {
+            //             ThrowHelper.ThrowSerializationException(ExceptionResource.Serialization_NullKey);
+            //         }
 
-                    Add(array[i].Key, array[i].Value);
-                }
-            }
-            _version = realVersion;
-            HashHelpers.SerializationInfoTable.Remove(this);
+            //         Add(array[i].Key, array[i].Value);
+            //     }
+            // }
+            // _version = realVersion;
+            // HashHelpers.SerializationInfoTable.Remove(this);
         }
         #endregion
 
@@ -857,7 +856,7 @@ namespace System.Collections.Generic
         private RawTableInner new_uninitialized(int buckets)
         {
             Debug.Assert(BitOperations.IsPow2(buckets));
-            byte[] _controls = new byte[buckets + _groupInfo.WIDTH];
+            byte[] _controls = new byte[buckets + _group.WIDTH];
             Entry[] _entries = new Entry[buckets];
             return new RawTableInner
             {
@@ -895,7 +894,7 @@ namespace System.Collections.Generic
                         // control bytes (containing EMPTY).
                         if (is_full(_controls[result]))
                         {
-                            Debug.Assert(_bucket_mask < _groupInfo.WIDTH);
+                            Debug.Assert(_bucket_mask < _group.WIDTH);
                             Debug.Assert(probe_seq.pos != 0);
                             fixed (byte* ptr2 = &_controls[0])
                             {
@@ -1017,7 +1016,7 @@ namespace System.Collections.Generic
             // Attention, we could not just only set mark to `Deleted` to assume it is deleted, the reference is still here, and GC would not collect it.
             Debug.Assert(is_full(_controls[index]));
             Debug.Assert(_entries != null, "entries should be non-null");
-            int index_before = unchecked((index - _groupInfo.WIDTH)) & _bucket_mask;
+            int index_before = unchecked((index - _group.WIDTH)) & _bucket_mask;
             TValue res;
             fixed (byte* ptr_before = &_controls[index_before])
             fixed (byte* ptr = &_controls[index])
@@ -1033,7 +1032,7 @@ namespace System.Collections.Generic
                 // Note that in this context `leading_zeros` refers to the bytes at the
                 // end of a group, while `trailing_zeros` refers to the bytes at the
                 // begining of a group.
-                if (empty_before.leading_zeros() + empty_after.trailing_zeros() >= _groupInfo.WIDTH)
+                if (empty_before.leading_zeros() + empty_after.trailing_zeros() >= _group.WIDTH)
                 {
                     ctrl = DELETED;
                 }
@@ -1087,7 +1086,7 @@ namespace System.Collections.Generic
             // ---------------------------------------------
             // | [A] | [B] | [EMPTY] | [EMPTY] | [A] | [B] |
             // ---------------------------------------------
-            var index2 = (((index - (_groupInfo.WIDTH))) & _bucket_mask) + _groupInfo.WIDTH;
+            var index2 = (((index - (_group.WIDTH))) & _bucket_mask) + _group.WIDTH;
             controls[index] = ctrl;
             controls[index2] = ctrl;
         }
@@ -1177,7 +1176,7 @@ namespace System.Collections.Generic
             {
                 // We should have found an empty bucket by now and ended the probe.
                 Debug.Assert(this.stride <= bucket_mask, "Went past end of probe sequence");
-                this.stride += _groupInfo.WIDTH;
+                this.stride += _group.WIDTH;
                 this.pos += this.stride;
                 this.pos &= bucket_mask;
             }
@@ -1292,14 +1291,14 @@ namespace System.Collections.Generic
                         return true;
                     }
                     // Shoudl we use closure here? What about the perf? Would CLR optimise this?
-                    if (this.current_ctrl_offset + _groupInfo.WIDTH >= this._dictionary._buckets)
+                    if (this.current_ctrl_offset + _group.WIDTH >= this._dictionary._buckets)
                     {
                         this._current = default;
                         isValid = false;
                         return false;
                     }
 
-                    this.current_ctrl_offset += _groupInfo.WIDTH;
+                    this.current_ctrl_offset += _group.WIDTH;
                     fixed (byte* ctrl = &_dictionary._controls[current_ctrl_offset])
                     {
                         this._currentBitMask = _group.load_aligned(ctrl).match_full();
@@ -1491,14 +1490,14 @@ namespace System.Collections.Generic
                             return true;
                         }
                         // Shoudl we use closure here? What about the perf? Would CLR optimise this?
-                        if (this.current_ctrl_offset + _groupInfo.WIDTH >= this._dictionary._buckets)
+                        if (this.current_ctrl_offset + _group.WIDTH >= this._dictionary._buckets)
                         {
                             this._current = default;
                             isValid = false;
                             return false;
                         }
 
-                        this.current_ctrl_offset += _groupInfo.WIDTH;
+                        this.current_ctrl_offset += _group.WIDTH;
                         fixed (byte* ctrl = &_dictionary._controls[current_ctrl_offset])
                         {
                             this._currentBitMask = _group.load_aligned(ctrl).match_full();
@@ -1703,14 +1702,14 @@ namespace System.Collections.Generic
                             return true;
                         }
                         // Shoudl we use closure here? What about the perf? Would CLR optimise this?
-                        if (this.current_ctrl_offset + _groupInfo.WIDTH >= this._dictionary._buckets)
+                        if (this.current_ctrl_offset + _group.WIDTH >= this._dictionary._buckets)
                         {
                             this._current = default;
                             isValid = false;
                             return false;
                         }
 
-                        this.current_ctrl_offset += _groupInfo.WIDTH;
+                        this.current_ctrl_offset += _group.WIDTH;
                         fixed (byte* ctrl = &_dictionary._controls[current_ctrl_offset])
                         {
                             this._currentBitMask = _group.load_aligned(ctrl).match_full();

@@ -5,7 +5,7 @@ namespace System.Collections.Generic
 {
     public interface ITriviaInfo
     {
-        public int WIDTH { get; }
+
     }
 
     public interface IGroup
@@ -18,7 +18,7 @@ namespace System.Collections.Generic
         /// </summary>
         /// <returns></returns>
         public abstract byte[] static_empty();
-
+        public int WIDTH { get; }
         public unsafe IGroup load(byte* ptr);
 
         /// <summary>

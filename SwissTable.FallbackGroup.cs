@@ -86,27 +86,16 @@ namespace System.Collections.Generic
             }
         }
 
-        /// <summary>
-        /// All property should be fixed as long as the hardware is specific.
-        /// We could use getter for all getter only properties like `WIDTH`.
-        /// However, we use a differnt design: As long as the properties are only used in the 
-        /// correspond hardware design, we only use `const`
-        /// </summary>
-        class FallbackTriviaInfo : ITriviaInfo
-        {
-            public unsafe int WIDTH => sizeof(nuint);
-        }
-
         // TODO: for 64-bits target, we could use ulong rather than uint to improve performance.
         struct FallbackGroup : IGroup
         {
-            private const uint ALIGN_WIDTH = 128 / 8;
+            public unsafe int WIDTH => sizeof(nuint);
             private const uint BITMASK_STRIDE = 1;
 
             private nuint repeat(byte b)
             {
                 nuint res = 0;
-                for (int i = 0; i < _groupInfo.WIDTH; i++)
+                for (int i = 0; i < this.WIDTH; i++)
                 {
                     res <<= 8;
                     res &= b;
@@ -123,7 +112,7 @@ namespace System.Collections.Generic
 
             public byte[] static_empty()
             {
-                return Enumerable.Repeat(EMPTY, _groupInfo.WIDTH).ToArray();
+                return Enumerable.Repeat(EMPTY, _group.WIDTH).ToArray();
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -135,16 +124,16 @@ namespace System.Collections.Generic
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public unsafe IGroup load_aligned(byte* ptr)
             {
-                // uint casting is OK, for ALIGN_WIDTH only use low 16 bits now.
-                Debug.Assert(((uint)ptr & (ALIGN_WIDTH - 1)) == 0);
+                // uint casting is OK, for WIDTH only use low 16 bits now.
+                Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
                 return new FallbackGroup(Unsafe.Read<uint>(ptr));
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public unsafe void store_aligned(byte* ptr)
             {
-                // uint casting is OK, for ALIGN_WIDTH only use low 16 bits now.
-                Debug.Assert(((uint)ptr & (ALIGN_WIDTH - 1)) == 0);
+                // uint casting is OK, for WIDTH only use low 16 bits now.
+                Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
                 Unsafe.Write(ptr, this._data);
             }
 
