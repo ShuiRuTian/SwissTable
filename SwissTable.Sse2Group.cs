@@ -90,7 +90,6 @@ namespace System.Collections.Generic
             }
         }
 
-        // TODO: for 64-bits target, we could use ulong rather than uint to improve performance.
         struct Sse2Group : IGroup
         {
             public int WIDTH => 128 / 8;
@@ -137,9 +136,6 @@ namespace System.Collections.Generic
                 var compareValue = Vector128.Create(b);
                 var cmp = Sse2.CompareEqual(this._data, compareValue);
                 return new Sse2BitMask((ushort)Sse2.MoveMask(cmp));
-
-                // let cmp = x86::_mm_cmpeq_epi8(self.0, x86::_mm_set1_epi8(byte as i8));
-                // BitMask(x86::_mm_movemask_epi8(cmp) as u16)
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
