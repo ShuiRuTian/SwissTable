@@ -3,10 +3,10 @@ using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Serialization;
+using static System.Collections.Generic.SwissTableHelper;
 
 namespace System.Collections.Generic
 {
-
     [DebuggerDisplay("Count = {Count}")]
     [Serializable]
     [TypeForwardedFrom("System.Core, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")]
@@ -56,49 +56,6 @@ namespace System.Collections.Generic
         // number of real values stored in the map
         // `items` in rust
         private int _count;
-
-        // Control byte value for an empty bucket.
-        private const byte EMPTY = 0b1111_1111;
-
-        /// Control byte value for a deleted bucket.
-        private const byte DELETED = 0b1000_0000;
-
-        /// Checks whether a control byte represents a full bucket (top bit is clear).
-        // #[inline]
-        private static bool is_full(byte ctrl) => (ctrl & 0x80) == 0;
-
-        /// Checks whether a control byte represents a special value (top bit is set).
-        // #[inline]
-        private static bool is_special(byte ctrl) => (ctrl & 0x80) != 0;
-
-        /// Checks whether a special control value is EMPTY (just check 1 bit).
-        // #[inline]
-        private static bool special_is_empty(byte ctrl)
-        {
-            Debug.Assert(is_special(ctrl));
-            return (ctrl & 0x01) != 0;
-        }
-
-        /// Primary hash function, used to select the initial bucket to probe from.
-        // #[inline]
-        // #[allow(clippy::cast_possible_truncation)]
-        private static int h1(int hash)
-        {
-            // On 32-bit platforms we simply ignore the higher hash bits.
-            return hash;
-        }
-
-        /// Secondary hash function, saved in the low 7 bits of the control byte.
-        // #[inline]
-        // #[allow(clippy::cast_possible_truncation)]
-        private static byte h2(int hash)
-        {
-            // Grab the top 7 bits of the hash. While the hash is normally a full 64-bit
-            // value, some hash functions (such as FxHash) produce a usize result
-            // instead, which means that the top 32 bits are 0 on 32-bit platforms.
-            var top7 = hash >> 25;
-            return (byte)(top7 & 0x7f); // truncation
-        }
 
         public MyDictionary() : this(0, null) { }
 
