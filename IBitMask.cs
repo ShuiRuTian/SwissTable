@@ -27,18 +27,6 @@ namespace System.Collections.Generic
         public IBitMask invert();
 
         /// <summary>
-        /// Flip the bit in the mask for the entry at the given index.
-        ///
-        /// Returns the bit's previous state.
-        /// </summary>
-        /// <param name="index"></param>
-        /// <returns></returns>
-        // #[inline]
-        // #[allow(clippy::cast_ptr_alignment)]
-        // #[cfg(feature = "raw")]
-        public bool flip(uint index);
-
-        /// <summary>
         /// Returns a new `BitMask` with the lowest bit removed.
         /// </summary>
         /// <returns></returns>
@@ -55,7 +43,7 @@ namespace System.Collections.Generic
 
         /// <summary>
         /// Returns the first set bit in the `BitMask`, if there is one.
-
+        /// TODO: use negative rather than nullable to represent no bit set.
         /// </summary>
         /// <returns></returns>
         // #[inline]

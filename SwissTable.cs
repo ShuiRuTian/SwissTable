@@ -69,15 +69,8 @@ namespace System.Collections.Generic
             {
                 ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.capacity);
             }
-            switch (capacity)
-            {
-                case < 0:
-                    ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.capacity);
-                    break;
-                default:
-                    Initialize(capacity);
-                    break;
-            }
+            
+            Initialize(capacity);
 
             if (comparer is not null && comparer != EqualityComparer<TKey>.Default) // first check for null to avoid forcing default comparer instantiation unnecessarily
             {
