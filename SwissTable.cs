@@ -10,7 +10,7 @@ namespace System.Collections.Generic
     [DebuggerDisplay("Count = {Count}")]
     [Serializable]
     [TypeForwardedFrom("System.Core, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")]
-    public partial class MyDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IDictionary//, IReadOnlyDictionary<TKey, TValue>, ISerializable, IDeserializationCallback where TKey : notnull
+    public partial class MyDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IDictionary, IReadOnlyDictionary<TKey, TValue>, ISerializable, IDeserializationCallback where TKey : notnull
     {
         // Term define:
         //   Capacity: The maximum number of non-empty items that a hash table can hold before scaling. (come from `EnsureCapacity`)
@@ -36,7 +36,7 @@ namespace System.Collections.Generic
 
         // each add/remove will add one version
         // For Enumerator, if version is changed, one error will be thrown for enumerator should not changed.
-        private readonly int _version;
+        private int _version;
 
         private IEqualityComparer<TKey>? _comparer;
 
@@ -46,9 +46,6 @@ namespace System.Collections.Generic
         // This is hard(impossible?) to be larger, for the length of array is limited to 0x7FFFF_FFFF
         private int _buckets => this._bucket_mask + 1;
 
-        // Mask to get an index from a hash value. The value is one less than the
-        // number of buckets in the table.
-        private int num_ctrl_bytes => _entries.Length + _groupInfo.WIDTH;
         private bool is_empty_singleton => _bucket_mask == 0;
 
         private int _bucket_mask;
@@ -170,6 +167,22 @@ namespace System.Collections.Generic
             AddRange(collection);
         }
 
+        public IEqualityComparer<TKey> Comparer
+        {
+            get
+            {
+                // TODO: uncomment
+                // if (typeof(TKey) == typeof(string))
+                // {
+                //     return (IEqualityComparer<TKey>)IInternalStringEqualityComparer.GetUnderlyingEqualityComparer((IEqualityComparer<string?>?)_comparer);
+                // }
+                // else
+                // {
+                return _comparer ?? EqualityComparer<TKey>.Default;
+                // }
+            }
+        }
+
         private void AddRange(IEnumerable<KeyValuePair<TKey, TValue>> collection)
         {
             // It is likely that the passed-in dictionary is Dictionary<TKey,TValue>. When this is the case,
@@ -244,12 +257,274 @@ namespace System.Collections.Generic
             return false;
         }
 
+        private KeyCollection? _keys;
+        public KeyCollection Keys => _keys ??= new KeyCollection(this);
+
+        private ValueCollection? _values;
+        public ValueCollection Values => _values ??= new ValueCollection(this);
+
+        public TValue this[TKey key]
+        {
+            get
+            {
+                ref TValue value = ref FindValue(key);
+                if (!Unsafe.IsNullRef(ref value))
+                {
+                    return value;
+                }
+
+                ThrowHelper.ThrowKeyNotFoundException(key);
+                return default;
+            }
+            set
+            {
+                bool modified = TryInsert(key, value, InsertionBehavior.OverwriteExisting);
+                Debug.Assert(modified);
+            }
+        }
+
+        public bool TryGetValue(TKey key, [MaybeNullWhen(false)] out TValue value)
+        {
+            ref TValue valRef = ref FindValue(key);
+            if (!Unsafe.IsNullRef(ref valRef))
+            {
+                value = valRef;
+                return true;
+            }
+
+            value = default;
+            return false;
+        }
+
+        public void Clear()
+        {
+            int count = _count;
+            if (count > 0)
+            {
+                Debug.Assert(_entries != null, "_entries should be non-null");
+
+                Array.Fill(_controls, EMPTY);
+                _count = 0;
+                _growth_left = bucket_mask_to_capacity(_bucket_mask);
+                // TODO: maybe we could remove this branch to improve perf. Or maybe CLR has optimised this.
+                if (RuntimeHelpers.IsReferenceOrContainsReferences<TValue>()
+                    || RuntimeHelpers.IsReferenceOrContainsReferences<TKey>())
+                {
+                    Array.Clear(_entries);
+                }
+            }
+        }
+
+        private static bool IsCompatibleKey(object key)
+        {
+            if (key == null)
+            {
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+            }
+            return key is TKey;
+        }
+
+        private void CopyTo(KeyValuePair<TKey, TValue>[] array, int index)
+        {
+            if (array == null)
+            {
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.array);
+            }
+
+            if ((uint)index > (uint)array.Length)
+            {
+                ThrowHelper.ThrowIndexArgumentOutOfRange_NeedNonNegNumException();
+            }
+
+            if (array.Length - index < Count)
+            {
+                ThrowHelper.ThrowArgumentException(ExceptionResource.Arg_ArrayPlusOffTooSmall);
+            }
+
+            CopyToWorker(array, index);
+        }
+
+        // This method not check whether array and index, maybe the name should be CopyToUnsafe?
+        private void CopyToWorker(KeyValuePair<TKey, TValue>[] array, int index)
+        {
+            foreach (var item in this)
+            {
+                array[index++] = new KeyValuePair<TKey, TValue>(item.Key, item.Value);
+            }
+        }
+
+        #region IDictionary
+        bool ICollection.IsSynchronized => false;
+
+        object ICollection.SyncRoot => this;
+
+        bool IDictionary.IsFixedSize => false;
+
+        ICollection IDictionary.Keys => Keys;
+
+        ICollection IDictionary.Values => Values;
+
+
+        object? IDictionary.this[object key]
+        {
+            get
+            {
+                if (IsCompatibleKey(key))
+                {
+                    ref TValue value = ref FindValue((TKey)key);
+                    if (!Unsafe.IsNullRef(ref value))
+                    {
+                        return value;
+                    }
+                }
+
+                return null;
+            }
+            set
+            {
+                if (key == null)
+                {
+                    ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+                }
+                ThrowHelper.IfNullAndNullsAreIllegalThenThrow<TValue>(value, ExceptionArgument.value);
+
+                try
+                {
+                    TKey tempKey = (TKey)key;
+                    try
+                    {
+                        this[tempKey] = (TValue)value!;
+                    }
+                    catch (InvalidCastException)
+                    {
+                        ThrowHelper.ThrowWrongValueTypeArgumentException(value, typeof(TValue));
+                    }
+                }
+                catch (InvalidCastException)
+                {
+                    ThrowHelper.ThrowWrongKeyTypeArgumentException(key, typeof(TKey));
+                }
+            }
+        }
+
+        void IDictionary.Add(object key, object? value)
+        {
+            if (key == null)
+            {
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+            }
+            ThrowHelper.IfNullAndNullsAreIllegalThenThrow<TValue>(value, ExceptionArgument.value);
+
+            try
+            {
+                TKey tempKey = (TKey)key;
+
+                try
+                {
+                    Add(tempKey, (TValue)value!);
+                }
+                catch (InvalidCastException)
+                {
+                    ThrowHelper.ThrowWrongValueTypeArgumentException(value, typeof(TValue));
+                }
+            }
+            catch (InvalidCastException)
+            {
+                ThrowHelper.ThrowWrongKeyTypeArgumentException(key, typeof(TKey));
+            }
+        }
+
+        bool IDictionary.Contains(object key)
+        {
+            if (IsCompatibleKey(key))
+            {
+                return ContainsKey((TKey)key);
+            }
+
+            return false;
+        }
+
+        IDictionaryEnumerator IDictionary.GetEnumerator() => new Enumerator(this, Enumerator.DictEntry);
+
+        void IDictionary.Remove(object key)
+        {
+            if (IsCompatibleKey(key))
+            {
+                Remove((TKey)key);
+            }
+        }
+
+        void ICollection.CopyTo(Array array, int index)
+        {
+            if (array == null)
+            {
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.array);
+            }
+
+            if (array.Rank != 1)
+            {
+                ThrowHelper.ThrowArgumentException(ExceptionResource.Arg_RankMultiDimNotSupported);
+            }
+
+            if (array.GetLowerBound(0) != 0)
+            {
+                ThrowHelper.ThrowArgumentException(ExceptionResource.Arg_NonZeroLowerBound);
+            }
+
+            if ((uint)index > (uint)array.Length)
+            {
+                ThrowHelper.ThrowIndexArgumentOutOfRange_NeedNonNegNumException();
+            }
+
+            if (array.Length - index < Count)
+            {
+                ThrowHelper.ThrowArgumentException(ExceptionResource.Arg_ArrayPlusOffTooSmall);
+            }
+
+            if (array is KeyValuePair<TKey, TValue>[] pairs)
+            {
+                CopyToWorker(pairs, index);
+            }
+            else if (array is DictionaryEntry[] dictEntryArray)
+            {
+                foreach (var item in this)
+                {
+                    dictEntryArray[index++] = new DictionaryEntry(item.Key, item.Value);
+                }
+            }
+            else
+            {
+                object[]? objects = array as object[];
+
+                if (objects == null)
+                {
+                    ThrowHelper.ThrowArgumentException_Argument_InvalidArrayType();
+                }
+
+                try
+                {
+                    foreach (var item in this)
+                    {
+                        objects[index++] = new KeyValuePair<TKey, TValue>(item.Key, item.Value);
+                    }
+                }
+                catch (ArrayTypeMismatchException)
+                {
+                    ThrowHelper.ThrowArgumentException_Argument_InvalidArrayType();
+                }
+            }
+        }
+        #endregion
+
+        #region IReadOnlyDictionary<TKey, TValue>
+        IEnumerable<TKey> IReadOnlyDictionary<TKey, TValue>.Keys => Keys;
+
+        IEnumerable<TValue> IReadOnlyDictionary<TKey, TValue>.Values => Values;
+        #endregion
+
         #region IDictionary<TKey, TValue>
-        TValue IDictionary<TKey, TValue>.this[TKey key] { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
-
-        ICollection<TKey> IDictionary<TKey, TValue>.Keys => throw new NotImplementedException();
-
-        ICollection<TValue> IDictionary<TKey, TValue>.Values => throw new NotImplementedException();
+        ICollection<TKey> IDictionary<TKey, TValue>.Keys => Keys;
+        ICollection<TValue> IDictionary<TKey, TValue>.Values => Values;
 
         public void Add(TKey key, TValue value)
         {
@@ -290,37 +565,37 @@ namespace System.Collections.Generic
             }
             return false;
         }
-
-        bool IDictionary<TKey, TValue>.TryGetValue(TKey key, out TValue value)
-        {
-            throw new NotImplementedException();
-        }
         #endregion
 
         #region ICollection<KeyValuePair<TKey, TValue>>
-        void ICollection<KeyValuePair<TKey, TValue>>.Add(KeyValuePair<TKey, TValue> item)
+        void ICollection<KeyValuePair<TKey, TValue>>.Add(KeyValuePair<TKey, TValue> keyValuePair) =>
+            Add(keyValuePair.Key, keyValuePair.Value);
+
+        bool ICollection<KeyValuePair<TKey, TValue>>.Contains(KeyValuePair<TKey, TValue> keyValuePair)
         {
-            throw new NotImplementedException();
+            ref TValue value = ref FindValue(keyValuePair.Key);
+            if (!Unsafe.IsNullRef(ref value) && EqualityComparer<TValue>.Default.Equals(value, keyValuePair.Value))
+            {
+                return true;
+            }
+
+            return false;
         }
 
-        void ICollection<KeyValuePair<TKey, TValue>>.Clear()
-        {
-            throw new NotImplementedException();
-        }
+        void ICollection<KeyValuePair<TKey, TValue>>.CopyTo(KeyValuePair<TKey, TValue>[] array, int index) =>
+            CopyTo(array, index);
 
-        bool ICollection<KeyValuePair<TKey, TValue>>.Contains(KeyValuePair<TKey, TValue> item)
-        {
-            throw new NotImplementedException();
-        }
 
-        void ICollection<KeyValuePair<TKey, TValue>>.CopyTo(KeyValuePair<TKey, TValue>[] array, int arrayIndex)
+        bool ICollection<KeyValuePair<TKey, TValue>>.Remove(KeyValuePair<TKey, TValue> keyValuePair)
         {
-            throw new NotImplementedException();
-        }
+            ref TValue value = ref FindValue(keyValuePair.Key);
+            if (!Unsafe.IsNullRef(ref value) && EqualityComparer<TValue>.Default.Equals(value, keyValuePair.Value))
+            {
+                Remove(keyValuePair.Key);
+                return true;
+            }
 
-        bool ICollection<KeyValuePair<TKey, TValue>>.Remove(KeyValuePair<TKey, TValue> item)
-        {
-            throw new NotImplementedException();
+            return false;
         }
         #endregion
 
@@ -331,6 +606,73 @@ namespace System.Collections.Generic
 
         #region IEnumerable
         IEnumerator IEnumerable.GetEnumerator() => new Enumerator(this, Enumerator.KeyValuePair);
+        #endregion
+
+        #region Serialization/Deserialization
+        // constants for Serialization/Deserialization
+        private const string VersionName = "Version"; // Do not rename (binary serialization)
+        private const string HashSizeName = "HashSize"; // Do not rename (binary serialization)
+        private const string KeyValuePairsName = "KeyValuePairs"; // Do not rename (binary serialization)
+        private const string ComparerName = "Comparer"; // Do not rename (binary serialization)
+
+        public virtual void GetObjectData(SerializationInfo info, StreamingContext context)
+        {
+            if (info == null)
+            {
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.info);
+            }
+
+            info.AddValue(VersionName, _version);
+            info.AddValue(ComparerName, Comparer, typeof(IEqualityComparer<TKey>));
+            info.AddValue(HashSizeName, _entries == null ? 0 : _entries.Length);
+
+            if (_entries != null)
+            {
+                var array = new KeyValuePair<TKey, TValue>[Count];
+                // This is always safe, for the array is allocated by ourself. There are always enough space.
+                CopyToWorker(array, 0);
+                info.AddValue(KeyValuePairsName, array, typeof(KeyValuePair<TKey, TValue>[]));
+            }
+        }
+
+        public virtual void OnDeserialization(object? sender)
+        {
+            HashHelpers.SerializationInfoTable.TryGetValue(this, out SerializationInfo? siInfo);
+            if (siInfo == null)
+            {
+                // We can return immediately if this function is called twice.
+                // Note we remove the serialization info from the table at the end of this method.
+                return;
+            }
+
+            int realVersion = siInfo.GetInt32(VersionName);
+            int hashsize = siInfo.GetInt32(HashSizeName);
+            _comparer = (IEqualityComparer<TKey>)siInfo.GetValue(ComparerName, typeof(IEqualityComparer<TKey>))!; // When serialized if comparer is null, we use the default.
+            Initialize(hashsize);
+
+            if (hashsize != 0)
+            {
+                KeyValuePair<TKey, TValue>[]? array = (KeyValuePair<TKey, TValue>[]?)
+                    siInfo.GetValue(KeyValuePairsName, typeof(KeyValuePair<TKey, TValue>[]));
+
+                if (array == null)
+                {
+                    ThrowHelper.ThrowSerializationException(ExceptionResource.Serialization_MissingKeys);
+                }
+
+                for (int i = 0; i < array.Length; i++)
+                {
+                    if (array[i].Key == null)
+                    {
+                        ThrowHelper.ThrowSerializationException(ExceptionResource.Serialization_NullKey);
+                    }
+
+                    Add(array[i].Key, array[i].Value);
+                }
+            }
+            _version = realVersion;
+            HashHelpers.SerializationInfoTable.Remove(this);
+        }
         #endregion
 
         public Enumerator GetEnumerator() => new Enumerator(this, Enumerator.KeyValuePair);
@@ -668,17 +1010,6 @@ namespace System.Collections.Generic
                 }
                 probe_seq.move_next(_bucket_mask);
             }
-        }
-
-        /// Marks all table buckets as empty without dropping their contents.
-        private void clear_no_drop()
-        {
-            if (!is_empty_singleton)
-            {
-                Array.Fill(_controls, EMPTY);
-            }
-            _count = 0;
-            _growth_left = bucket_mask_to_capacity(_bucket_mask);
         }
 
         private unsafe TValue erase(int index)

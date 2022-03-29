@@ -4,6 +4,14 @@ namespace System.Collections.Generic
     {
         static class ThrowHelper
         {
+            public static void ThrowSerializationException<T>(T any)
+            {
+                throw new Exception();
+            }
+            public static void ThrowKeyNotFoundException<T>(T any)
+            {
+                throw new Exception();
+            }
             public static void ThrowArgumentOutOfRangeException<T>(T any)
             {
                 throw new Exception();
@@ -41,6 +49,18 @@ namespace System.Collections.Generic
                 throw new Exception();
             }
             public static void ThrowInvalidOperationException_InvalidOperation_EnumFailedVersion()
+            {
+                throw new Exception();
+            }
+            public static void IfNullAndNullsAreIllegalThenThrow<T>(object? anyO, T any)
+            {
+                throw new Exception();
+            }
+            public static void ThrowWrongValueTypeArgumentException<T, U>(T any1, U any2)
+            {
+                throw new Exception();
+            }
+            public static void ThrowWrongKeyTypeArgumentException<T, U>(T any1, U any2)
             {
                 throw new Exception();
             }
