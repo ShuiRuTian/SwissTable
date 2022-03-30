@@ -9,6 +9,17 @@ namespace System.Collections.Generic
 {
     static class SwissTableHelper
     {
+        static SwissTableHelper()
+        {
+            if (Sse2.IsSupported)
+            {
+                _group = new Sse2Group();
+            }
+            _group = new FallbackGroup();
+        }
+        
+        public static readonly IGroup _group;
+
         // Control byte value for an empty bucket.
         public const byte EMPTY = 0b1111_1111;
 

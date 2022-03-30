@@ -19,8 +19,6 @@ namespace System.Collections.Generic
         //   growth_left: due to the existing of tombstone, non-empty does not mean there is indeed a value.
         //   bucket: `Entry` in the code, which could hold a key-value pair
 
-        private static readonly IGroup _group = new Sse2Group();
-
         // this contains all meaningfull data but _version
         private struct RawTableInner
         {
