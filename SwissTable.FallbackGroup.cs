@@ -1,21 +1,23 @@
+// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
 using System.Diagnostics;
-using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.X86;
 
 namespace System.Collections.Generic
 {
-    struct Sse2BitMask : IBitMask
+    internal struct FallbackBitMask : IBitMask
     {
-        private const ushort BITMASK_MASK = 0xffff;
-
         // 128 / 8 = 16, so choose ushort
         // Or maybe we could use `int` with only lowset 16 bits and some trick?
-        ushort _data;
+        private readonly nuint  _data;
 
-        internal Sse2BitMask(ushort data)
+        private static nuint BITMASK_MASK => unchecked((nuint)0x8080_8080_8080_8080);
+
+        private const int BITMASK_SHIFT = 3;
+
+        internal FallbackBitMask(nuint data)
         {
             _data = data;
         }
@@ -24,7 +26,7 @@ namespace System.Collections.Generic
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public IBitMask invert()
         {
-            return new Sse2BitMask((ushort)(this._data ^ BITMASK_MASK));
+            return new FallbackBitMask((nuint)(this._data ^ BITMASK_MASK));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -36,11 +38,15 @@ namespace System.Collections.Generic
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int leading_zeros()
         {
-            // maigc number `16`
-            // type of `this._data` is `short`
-            // however, it will be tranfrom to `uint` implicitly
-            // So it is 32 - 16 = 16
-            return BitOperations.LeadingZeroCount(this._data) - 16;
+#if TARGET_64BIT
+            return BitOperations.LeadingZeroCount(this._data) >> BITMASK_SHIFT;
+#else
+            // maigc number `32`
+            // type of `this._data` is `nunit`
+            // however, it will be tranfrom to `ulong` implicitly
+            // So it is 64 - 32 = 32
+            return (BitOperations.LeadingZeroCount(this._data) - 32) >> BITMASK_SHIFT;
+#endif
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -65,23 +71,34 @@ namespace System.Collections.Generic
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public IBitMask remove_lowest_bit()
         {
-            return new Sse2BitMask((ushort)(this._data & (this._data - 1)));
+            return new FallbackBitMask((nuint)(this._data & (this._data - 1)));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int trailing_zeros()
         {
-            return BitOperations.TrailingZeroCount(this._data);
+            return BitOperations.TrailingZeroCount(this._data) >> BITMASK_SHIFT;
         }
     }
 
-    struct Sse2Group : IGroup
+    internal struct FallbackGroup : IGroup
     {
-        public int WIDTH => 128 / 8;
+        public unsafe int WIDTH => sizeof(nuint);
 
-        Vector128<byte> _data;
+        private nuint repeat(byte b)
+        {
+            nuint res = 0;
+            for (int i = 0; i < this.WIDTH; i++)
+            {
+                res <<= 8;
+                res &= b;
+            }
+            return res;
+        }
 
-        internal Sse2Group(Vector128<byte> data)
+        private readonly nuint _data;
+
+        internal FallbackGroup(nuint data)
         {
             _data = data;
         }
@@ -96,45 +113,49 @@ namespace System.Collections.Generic
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public unsafe IGroup load(byte* ptr)
         {
-            return new Sse2Group(Sse2.LoadVector128(ptr));
+            return new FallbackGroup(Unsafe.ReadUnaligned<nuint>(ptr));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public unsafe IGroup load_aligned(byte* ptr)
         {
-            // uint casting is OK, for ALIGN_WIDTH only use low 16 bits now.
+            // uint casting is OK, for WIDTH only use low 16 bits now.
             Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
-            return new Sse2Group(Sse2.LoadAlignedVector128(ptr));
+            return new FallbackGroup(Unsafe.Read<nuint>(ptr));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public unsafe void store_aligned(byte* ptr)
         {
-            // uint casting is OK, for ALIGN_WIDTH only use low 16 bits now.
+            // uint casting is OK, for WIDTH only use low 16 bits now.
             Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
-            Sse2.StoreAligned(ptr, this._data);
+            Unsafe.Write(ptr, this._data);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public IBitMask match_byte(byte b)
         {
-            // TODO: Check how compiler create this, which command it uses. This might incluence performance dramatically.
-            var compareValue = Vector128.Create(b);
-            var cmp = Sse2.CompareEqual(this._data, compareValue);
-            return new Sse2BitMask((ushort)Sse2.MoveMask(cmp));
+            // This algorithm is derived from
+            // https://graphics.stanford.edu/~seander/bithacks.html##ValueInWord
+            var cmp = this._data ^ this.repeat(b);
+            var res = unchecked((cmp - (nuint)0x0101_0101_0101_0101) & ~cmp & (nuint)0x8080_8080_8080_8080);
+            return new FallbackBitMask(res);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public IBitMask match_empty()
         {
-            return this.match_byte(SwissTableHelper.EMPTY);
+            // If the high bit is set, then the byte must be either:
+            // 1111_1111 (EMPTY) or 1000_0000 (DELETED).
+            // So we can just check if the top two bits are 1 by ANDing them.
+            return new FallbackBitMask(this._data & this._data << 1 & unchecked((nuint)0x8080_8080_8080_8080));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public IBitMask match_empty_or_deleted()
         {
             // A byte is EMPTY or DELETED iff the high bit is set
-            return new Sse2BitMask((ushort)Sse2.MoveMask(this._data));
+            return new FallbackBitMask(this._data & unchecked((nuint)0x8080_8080_8080_8080));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -150,15 +171,13 @@ namespace System.Collections.Generic
             // and high_bit = 0 (FULL) to 1000_0000
             //
             // Here's this logic expanded to concrete values:
-            //   let special = 0 > byte = 1111_1111 (true) or 0000_0000 (false)
-            //   1111_1111 | 1000_0000 = 1111_1111
-            //   0000_0000 | 1000_0000 = 1000_0000
-            // byte: 0x80_u8 as i8
-            var zero = Vector128<sbyte>.Zero;
-            zero.As<sbyte, byte>();
-            // TODO: check whether asXXXX could be removed.
-            var special = Sse2.CompareGreaterThan(zero, this._data.AsSByte()).AsByte();
-            return new Sse2Group(Sse2.Or(special, Vector128.Create((byte)0x80)));
+            //   let full = 1000_0000 (true) or 0000_0000 (false)
+            //   !1000_0000 + 1 = 0111_1111 + 1 = 1000_0000 (no carry)
+            //   !0000_0000 + 0 = 1111_1111 + 0 = 1111_1111 (no carry)
+            nuint full = ~this._data & unchecked((nuint)0x8080_8080_8080_8080);
+            var q = (full >> 7);
+            var w = ~full + q;
+            return new FallbackGroup(w);
         }
     }
 }

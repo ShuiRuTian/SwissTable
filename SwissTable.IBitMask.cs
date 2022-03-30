@@ -1,5 +1,5 @@
-using System.Diagnostics;
-using System.Runtime.Intrinsics.X86;
+// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
 
 namespace System.Collections.Generic
 {
@@ -16,64 +16,51 @@ namespace System.Collections.Generic
     /// performed on counts/indices to normalize this difference. `BITMASK_MASK` is
     /// similarly a mask of all the actually-used bits.
     /// </summary>
-    public interface IBitMask
+    internal interface IBitMask
     {
         /// <summary>
         /// Returns a new `BitMask` with all bits inverted.
         /// </summary>
         /// <returns></returns>
-        // #[inline]
-        // #[must_use]
-        public IBitMask invert();
+        IBitMask invert();
 
         /// <summary>
         /// Returns a new `BitMask` with the lowest bit removed.
         /// </summary>
         /// <returns></returns>
-        // #[inline]
-        // #[must_use]
-        public IBitMask remove_lowest_bit();
+        IBitMask remove_lowest_bit();
 
         /// <summary>
         /// Returns whether the `BitMask` has at least one set bit.
         /// </summary>
         /// <returns></returns>
-        // #[inline]
-        public bool any_bit_set();
+        bool any_bit_set();
 
         /// <summary>
         /// Returns the first set bit in the `BitMask`, if there is one.
         /// TODO: use negative rather than nullable to represent no bit set.
         /// </summary>
         /// <returns></returns>
-        // #[inline]
-        public int? lowest_set_bit();
+        int? lowest_set_bit();
 
         /// <summary>
         /// Returns the first set bit in the `BitMask`, if there is one. The
         /// bitmask must not be empty.
         /// </summary>
         /// <returns></returns>
-        // #[inline]
         // #[cfg(feature = "nightly")]
-        public int lowest_set_bit_nonzero();
-
-        // // #[inline]
-        // // #[cfg(not(feature = "nightly"))]
-        // public abstract uint lowest_set_bit_nonzero();
+        int lowest_set_bit_nonzero();
 
         /// <summary>
         /// Returns the number of trailing zeroes in the `BitMask`.
         /// </summary>
         /// <returns></returns>
-        // #[inline]
-        public int trailing_zeros();
+        int trailing_zeros();
 
         /// <summary>
         /// Returns the number of leading zeroes in the `BitMask`.
         /// </summary>
         /// <returns></returns>
-        // #[inline]
-        public int leading_zeros();
+        int leading_zeros();
     }
 }

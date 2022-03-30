@@ -1,23 +1,24 @@
+// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
 using System.Diagnostics;
-using System.Linq;
-using System.Numerics;
-using System.Runtime.CompilerServices;
-using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+
+#pragma warning disable CA1810 // Initialize reference type static fields inline
 
 namespace System.Collections.Generic
 {
-    static class SwissTableHelper
+    internal static class SwissTableHelper
     {
         static SwissTableHelper()
         {
             if (Sse2.IsSupported)
             {
-                _group = new Sse2Group();
+                _group = default(Sse2Group);
             }
-            _group = new FallbackGroup();
+            _group = default(FallbackGroup);
         }
-        
+
         public static readonly IGroup _group;
 
         // Control byte value for an empty bucket.
@@ -27,15 +28,12 @@ namespace System.Collections.Generic
         public const byte DELETED = 0b1000_0000;
 
         /// Checks whether a control byte represents a full bucket (top bit is clear).
-        // #[inline]
         public static bool is_full(byte ctrl) => (ctrl & 0x80) == 0;
 
         /// Checks whether a control byte represents a special value (top bit is set).
-        // #[inline]
         public static bool is_special(byte ctrl) => (ctrl & 0x80) != 0;
 
         /// Checks whether a special control value is EMPTY (just check 1 bit).
-        // #[inline]
         public static bool special_is_empty(byte ctrl)
         {
             Debug.Assert(is_special(ctrl));
@@ -43,8 +41,6 @@ namespace System.Collections.Generic
         }
 
         /// Primary hash function, used to select the initial bucket to probe from.
-        // #[inline]
-        // #[allow(clippy::cast_possible_truncation)]
         public static int h1(int hash)
         {
             // On 32-bit platforms we simply ignore the higher hash bits.
@@ -52,15 +48,13 @@ namespace System.Collections.Generic
         }
 
         /// Secondary hash function, saved in the low 7 bits of the control byte.
-        // #[inline]
-        // #[allow(clippy::cast_possible_truncation)]
         public static byte h2(int hash)
         {
             // Grab the top 7 bits of the hash. While the hash is normally a full 64-bit
             // value, some hash functions (such as FxHash) produce a usize result
             // instead, which means that the top 32 bits are 0 on 32-bit platforms.
             var top7 = hash >> 25;
-            return (byte)(top7 & 0x7f); // truncation
+            return (byte)(top7 & 0x7f);
         }
     }
 }

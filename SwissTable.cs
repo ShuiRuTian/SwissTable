@@ -1,3 +1,6 @@
+// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
@@ -7,7 +10,7 @@ using static System.Collections.Generic.SwissTableHelper;
 
 namespace System.Collections.Generic
 {
-    // [DebuggerTypeProxy(typeof(IDictionaryDebugView<,>))]
+    [DebuggerTypeProxy(typeof(IDictionaryDebugView<,>))]
     [DebuggerDisplay("Count = {Count}")]
     [Serializable]
     [TypeForwardedFrom("System.Core, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")]
@@ -36,7 +39,7 @@ namespace System.Collections.Generic
         // each add/remove will add one version
         // For Enumerator, if version is changed, one error will be thrown for enumerator should not changed.
         private int _version;
-        private RawTableInner rawTable = new RawTableInner();
+        private RawTableInner rawTable;
 
         public int Count => this.rawTable._count;
 
@@ -162,7 +165,7 @@ namespace System.Collections.Generic
                 CloneRawTable(source.rawTable, this.rawTable);
                 return;
             }
-
+            Debug.Assert(source.rawTable._entries != null);
             byte[] oldCtrls = source.rawTable._controls;
             Entry[] oldEntries = source.rawTable._entries;
 
@@ -246,7 +249,7 @@ namespace System.Collections.Generic
 
                 Array.Fill(rawTable._controls, EMPTY);
                 rawTable._count = 0;
-                rawTable._growth_left = bucket_mask_to_capacity(rawTable._bucket_mask);
+                rawTable._growth_left = MyDictionary<TKey, TValue>.bucket_mask_to_capacity(rawTable._bucket_mask);
                 // TODO: maybe we could remove this branch to improve perf. Or maybe CLR has optimised this.
                 if (RuntimeHelpers.IsReferenceOrContainsReferences<TValue>()
                     || RuntimeHelpers.IsReferenceOrContainsReferences<TKey>())
@@ -578,41 +581,41 @@ namespace System.Collections.Generic
 
         public virtual void OnDeserialization(object? sender)
         {
-            // HashHelpers.SerializationInfoTable.TryGetValue(this, out SerializationInfo? siInfo);
-            // if (siInfo == null)
-            // {
-            //     // We can return immediately if this function is called twice.
-            //     // Note we remove the serialization info from the table at the end of this method.
-            //     return;
-            // }
+            HashHelpers.SerializationInfoTable.TryGetValue(this, out SerializationInfo? siInfo);
+            if (siInfo == null)
+            {
+                // We can return immediately if this function is called twice.
+                // Note we remove the serialization info from the table at the end of this method.
+                return;
+            }
 
-            // int realVersion = siInfo.GetInt32(VersionName);
-            // int hashsize = siInfo.GetInt32(HashSizeName);
-            // _comparer = (IEqualityComparer<TKey>)siInfo.GetValue(ComparerName, typeof(IEqualityComparer<TKey>))!; // When serialized if comparer is null, we use the default.
-            // Initialize(hashsize);
+            int realVersion = siInfo.GetInt32(VersionName);
+            int hashsize = siInfo.GetInt32(HashSizeName);
+            rawTable._comparer = (IEqualityComparer<TKey>)siInfo.GetValue(ComparerName, typeof(IEqualityComparer<TKey>))!; // When serialized if comparer is null, we use the default.
+            Initialize(hashsize);
 
-            // if (hashsize != 0)
-            // {
-            //     KeyValuePair<TKey, TValue>[]? array = (KeyValuePair<TKey, TValue>[]?)
-            //         siInfo.GetValue(KeyValuePairsName, typeof(KeyValuePair<TKey, TValue>[]));
+            if (hashsize != 0)
+            {
+                KeyValuePair<TKey, TValue>[]? array = (KeyValuePair<TKey, TValue>[]?)
+                    siInfo.GetValue(KeyValuePairsName, typeof(KeyValuePair<TKey, TValue>[]));
 
-            //     if (array == null)
-            //     {
-            //         ThrowHelper.ThrowSerializationException(ExceptionResource.Serialization_MissingKeys);
-            //     }
+                if (array == null)
+                {
+                    ThrowHelper.ThrowSerializationException(ExceptionResource.Serialization_MissingKeys);
+                }
 
-            //     for (int i = 0; i < array.Length; i++)
-            //     {
-            //         if (array[i].Key == null)
-            //         {
-            //             ThrowHelper.ThrowSerializationException(ExceptionResource.Serialization_NullKey);
-            //         }
+                for (int i = 0; i < array.Length; i++)
+                {
+                    if (array[i].Key == null)
+                    {
+                        ThrowHelper.ThrowSerializationException(ExceptionResource.Serialization_NullKey);
+                    }
 
-            //         Add(array[i].Key, array[i].Value);
-            //     }
-            // }
-            // _version = realVersion;
-            // HashHelpers.SerializationInfoTable.Remove(this);
+                    Add(array[i].Key, array[i].Value);
+                }
+            }
+            _version = realVersion;
+            HashHelpers.SerializationInfoTable.Remove(this);
         }
         #endregion
 
@@ -829,7 +832,7 @@ namespace System.Collections.Generic
         /// leave the data pointer dangling since that bucket is never written to
         /// due to our load factor forcing us to always have at least 1 free bucket.
         /// </summary>
-        private RawTableInner new_in()
+        private static RawTableInner new_in()
         {
             // unlike rust, maybe we should convert this to a forever lived array that is allocated with specific value.
             byte[] _controls = _group.static_empty();
@@ -849,7 +852,7 @@ namespace System.Collections.Generic
         /// The control bytes are left uninitialized.
         /// </summary>
         // unlike rust, we never cares about out of memory
-        private RawTableInner new_uninitialized(int buckets)
+        private static RawTableInner new_uninitialized(int buckets)
         {
             Debug.Assert(BitOperations.IsPow2(buckets));
             byte[] _controls = new byte[buckets + _group.WIDTH];
@@ -859,7 +862,7 @@ namespace System.Collections.Generic
                 _bucket_mask = buckets - 1,
                 _controls = _controls,
                 _entries = _entries,
-                _growth_left = bucket_mask_to_capacity(buckets - 1),
+                _growth_left = MyDictionary<TKey, TValue>.bucket_mask_to_capacity(buckets - 1),
                 _count = 0
             };
         }
@@ -1090,7 +1093,7 @@ namespace System.Collections.Generic
         // TODO: overflow, what about cap > uint.Max
         /// Returns the number of buckets needed to hold the given number of items,
         /// taking the maximum load factor into account.
-        private int capacity_to_buckets(int cap)
+        private static int capacity_to_buckets(int cap)
         {
             Debug.Assert(cap > 0);
             var capacity = (uint)cap;
@@ -1129,7 +1132,7 @@ namespace System.Collections.Generic
             return nextPowerOfTwo(adjusted_capacity);
 
             // TODO: what about this overflow?
-            int nextPowerOfTwo(int num)
+            static int nextPowerOfTwo(int num)
             {
                 num |= num >> 1;
                 num |= num >> 2;
@@ -1142,8 +1145,7 @@ namespace System.Collections.Generic
 
         /// Returns the maximum effective capacity for the given bucket mask, taking
         /// the maximum load factor into account.
-        // #[inline]
-        private int bucket_mask_to_capacity(int bucket_mask)
+        private static int bucket_mask_to_capacity(int bucket_mask)
         {
             if (bucket_mask < 8)
             {
@@ -1158,20 +1160,20 @@ namespace System.Collections.Generic
             }
         }
 
-        /// Probe sequence based on triangular numbers, which is guaranteed (since our
-        /// table size is a power of two) to visit every group of elements exactly once.
-        ///
-        /// A triangular probe has us jump by 1 more group every time. So first we
-        /// jump by 1 group (meaning we just continue our linear scan), then 2 groups
-        /// (skipping over 1 group), then 3 groups (skipping over 2 groups), and so on.
-        ///
-        /// The proof is a simple number theory question: i*(i+1)/2 can walk through the complete residue system of 2n
-        /// to prove this, we could prove when `0 <= i <= j < 2n`, `i*(i+1)/2 mod 2n == j*(j+1)/2` iff `i == j`
-        /// sufficient: we could have `(i-j)(i+j+1)=4n*k`, k is integer. It is obvious that if i!=j, the left part is odd, but right is always even.
-        /// So, the the only chance is i==j
-        /// necessary: obvious
-        /// Q.E.D.
-        struct ProbeSeq
+        // Probe sequence based on triangular numbers, which is guaranteed (since our
+        // table size is a power of two) to visit every group of elements exactly once.
+        //
+        // A triangular probe has us jump by 1 more group every time. So first we
+        // jump by 1 group (meaning we just continue our linear scan), then 2 groups
+        // (skipping over 1 group), then 3 groups (skipping over 2 groups), and so on.
+        //
+        // The proof is a simple number theory question: i*(i+1)/2 can walk through the complete residue system of 2n
+        // to prove this, we could prove when "0 <= i <= j < 2n", "i * (i + 1) / 2 mod 2n == j * (j + 1) / 2" iff "i == j"
+        // sufficient: we could have `(i-j)(i+j+1)=4n*k`, k is integer. It is obvious that if i!=j, the left part is odd, but right is always even.
+        // So, the the only chance is i==j
+        // necessary: obvious
+        // Q.E.D.
+        internal struct ProbeSeq
         {
             public int pos;
             public int stride;
@@ -1202,7 +1204,7 @@ namespace System.Collections.Generic
             internal const int DictEntry = 1;
             internal const int KeyValuePair = 2;
 
-            unsafe internal Enumerator(MyDictionary<TKey, TValue> dictionary, int getEnumeratorRetType)
+            internal unsafe Enumerator(MyDictionary<TKey, TValue> dictionary, int getEnumeratorRetType)
             {
                 _dictionary = dictionary;
                 _version = dictionary._version;
@@ -1281,7 +1283,7 @@ namespace System.Collections.Generic
 
             void IDisposable.Dispose() { }
 
-            unsafe public bool MoveNext()
+            public unsafe bool MoveNext()
             {
                 if (_version != _dictionary._version)
                 {
@@ -1292,6 +1294,7 @@ namespace System.Collections.Generic
                     var lowest_set_bit = this._currentBitMask.lowest_set_bit();
                     if (lowest_set_bit.HasValue)
                     {
+                        Debug.Assert(this._dictionary.rawTable._entries != null);
                         isValid = true;
                         this._currentBitMask = this._currentBitMask.remove_lowest_bit();
                         var entry = this._dictionary.rawTable._entries[this.current_ctrl_offset + lowest_set_bit.Value];
@@ -1431,13 +1434,12 @@ namespace System.Collections.Generic
                 else
                 {
                     object[]? objects = array as object[];
+
                     if (objects == null)
                     {
                         ThrowHelper.ThrowArgumentException_Argument_InvalidArrayType();
                     }
 
-                    int count = _dictionary.rawTable._count;
-                    Entry[]? entries = _dictionary.rawTable._entries;
                     try
                     {
                         foreach (var item in this)
@@ -1465,7 +1467,7 @@ namespace System.Collections.Generic
                 private bool isValid; // valid when _current has correct value.
                 private TKey? _current;
 
-                unsafe internal Enumerator(MyDictionary<TKey, TValue> dictionary)
+                internal unsafe Enumerator(MyDictionary<TKey, TValue> dictionary)
                 {
                     _dictionary = dictionary;
                     _version = dictionary._version;
@@ -1480,7 +1482,7 @@ namespace System.Collections.Generic
 
                 public void Dispose() { }
 
-                unsafe public bool MoveNext()
+                public unsafe bool MoveNext()
                 {
                     if (_version != _dictionary._version)
                     {
@@ -1491,6 +1493,7 @@ namespace System.Collections.Generic
                         var lowest_set_bit = this._currentBitMask.lowest_set_bit();
                         if (lowest_set_bit.HasValue)
                         {
+                            Debug.Assert(this._dictionary.rawTable._entries != null);
                             isValid = true;
                             this._currentBitMask = this._currentBitMask.remove_lowest_bit();
                             var entry = this._dictionary.rawTable._entries[this.current_ctrl_offset + lowest_set_bit.Value];
@@ -1654,7 +1657,7 @@ namespace System.Collections.Generic
                     {
                         foreach (var item in this)
                         {
-                            objects[index++] = item;
+                            objects[index++] = item!;
                         }
                     }
                     catch (ArrayTypeMismatchException)
@@ -1677,7 +1680,7 @@ namespace System.Collections.Generic
                 private bool isValid; // valid when _current has correct value.
                 private TValue? _current;
 
-                unsafe internal Enumerator(MyDictionary<TKey, TValue> dictionary)
+                internal unsafe Enumerator(MyDictionary<TKey, TValue> dictionary)
                 {
                     _dictionary = dictionary;
                     _version = dictionary._version;
@@ -1692,7 +1695,7 @@ namespace System.Collections.Generic
 
                 public void Dispose() { }
 
-                unsafe public bool MoveNext()
+                public unsafe bool MoveNext()
                 {
                     if (_version != _dictionary._version)
                     {
@@ -1700,6 +1703,7 @@ namespace System.Collections.Generic
                     }
                     while (true)
                     {
+                        Debug.Assert(this._dictionary.rawTable._entries!=null);
                         var lowest_set_bit = this._currentBitMask.lowest_set_bit();
                         if (lowest_set_bit.HasValue)
                         {
