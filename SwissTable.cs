@@ -21,7 +21,7 @@ namespace System.Collections.Generic
 
         private static readonly IGroup _group = new Sse2Group();
 
-        // this contains all meaningfull data expect _version
+        // this contains all meaningfull data but _version
         private struct RawTableInner
         {
             internal int _bucket_mask;
@@ -47,6 +47,7 @@ namespace System.Collections.Generic
         // The real space that the swisstable allocated
         // always be the power of 2
         // This means the upper bound is not Int32.MaxValue(0x7FFFF_FFFF), but 0x4000_0000
+        // TODO: Should we throw an expection if user try to grow again when it has been largest?
         // This is hard(impossible?) to be larger, for the length of array is limited to 0x7FFFF_FFFF
         private int _buckets => this.rawTable._bucket_mask + 1;
 
@@ -134,8 +135,10 @@ namespace System.Collections.Generic
             // avoid the enumerator allocation and overhead by looping through the entries array directly.
             // We only do this when dictionary is Dictionary<TKey,TValue> and not a subclass, to maintain
             // back-compat with subclasses that may have overridden the enumerator behavior.
-            if (collection is MyDictionary<TKey, TValue> source)
+            if (collection.GetType() == typeof(MyDictionary<TKey, TValue>))
             {
+                MyDictionary<TKey, TValue> source = (MyDictionary<TKey, TValue>)collection;
+
                 CloneFromDictionary(source);
             }
 
@@ -159,17 +162,16 @@ namespace System.Collections.Generic
             if (this.rawTable._comparer == source.rawTable._comparer)
             {
                 CloneRawTable(source.rawTable, this.rawTable);
+                return;
             }
 
             byte[] oldCtrls = source.rawTable._controls;
             Entry[] oldEntries = source.rawTable._entries;
 
-            // TODO: use IBitMask to itereate, which is not just "inline" the enumtrator, we could just add GROUP::WIDTH, no need to use ProbeSeq
-            // Comparers differ need to rehash all the entires via Add
+            // TODO: // TODO: Maybe we could use IBITMASK to accllerate
             int count = source.rawTable._count;
             for (int i = 0; i < count; i++)
             {
-                // Only copy if an entry
                 if (is_full(oldCtrls[i]))
                 {
                     Add(oldEntries[i].Key, oldEntries[i].Value);
@@ -719,14 +721,10 @@ namespace System.Collections.Generic
             Debug.Assert(newTable._entries != null);
             Array.Fill(newTable._controls, EMPTY);
             CloneRawTable(this.rawTable, newTable);
-            this.rawTable._bucket_mask = newTable._bucket_mask;
-            this.rawTable._controls = newTable._controls;
-            this.rawTable._entries = newTable._entries;
-            this.rawTable._count = newTable._count;
-            this.rawTable._growth_left = newTable._growth_left;
+            this.rawTable = newTable;
         }
 
-        // Caller need to make newRawTable is clean and have enough capacity
+        // Caller need to make sure `newRawTable` is clean and have enough capacity
         private void CloneRawTable(RawTableInner sourceRawTable, RawTableInner newRawTable)
         {
             Debug.Assert(sourceRawTable._entries is not null);
@@ -738,14 +736,13 @@ namespace System.Collections.Generic
             // - there are no DELETED entries.
             // - we know there is enough space in the table.
             // - all elements are unique.
-            // TODO: "inline" the foreach for better performance
             byte[] oldCtrls = sourceRawTable._controls;
             Entry[] oldEntries = sourceRawTable._entries;
             Entry[] newEntries = newRawTable._entries;
             int count = sourceRawTable._count;
+            // TODO: Maybe we could use IBITMASK to accllerate
             for (int i = 0; i < count; i++)
             {
-                // Only copy if an entry
                 if (is_full(oldCtrls[i]))
                 {
                     this.set_ctrl(i, oldCtrls[i], newRawTable._controls);
@@ -782,6 +779,48 @@ namespace System.Collections.Generic
             }
 
             return this.rawTable._count + this.rawTable._growth_left;
+        }
+
+
+        /// <summary>
+        /// Sets the capacity of this dictionary to what it would be if it had been originally initialized with all its entries
+        /// </summary>
+        /// <remarks>
+        /// This method can be used to minimize the memory overhead
+        /// once it is known that no new elements will be added.
+        ///
+        /// To allocate minimum size storage array, execute the following statements:
+        ///
+        /// dictionary.Clear();
+        /// dictionary.TrimExcess();
+        /// </remarks>
+        public void TrimExcess() => TrimExcess(Count);
+
+        /// <summary>
+        /// Sets the capacity of this dictionary to hold up 'capacity' entries without any further expansion of its backing storage
+        /// </summary>
+        /// <remarks>
+        /// This method can be used to minimize the memory overhead
+        /// once it is known that no new elements will be added.
+        /// </remarks>
+        public void TrimExcess(int capacity)
+        {
+            if (capacity < Count)
+            {
+                ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.capacity);
+            }
+            if (capacity == 0)
+            {
+                this.Initialize(capacity);
+            }
+            var idealCap = capacity_to_buckets(capacity);
+            int currentCapacity = this.rawTable._count + this.rawTable._growth_left;
+            if (idealCap >= currentCapacity)
+            {
+                return;
+            }
+            _version++;
+            this.Resize(capacity);
         }
 
         /// <summary>
@@ -1053,31 +1092,43 @@ namespace System.Collections.Generic
         // TODO: overflow, what about cap > uint.Max
         /// Returns the number of buckets needed to hold the given number of items,
         /// taking the maximum load factor into account.
-        ///
         private int capacity_to_buckets(int cap)
         {
             Debug.Assert(cap > 0);
+            var capacity = (uint)cap;
 
             // For small tables we require at least 1 empty bucket so that lookups are
             // guaranteed to terminate if an element doesn't exist in the table.
-            if (cap < 8)
+            if (capacity < 8)
             {
                 // We don't bother with a table size of 2 buckets since that can only
                 // hold a single element. Instead we skip directly to a 4 bucket table
                 // which can hold 3 elements.
-                return (cap < 4 ? 4 : 8);
+                return (capacity < 4 ? 4 : 8);
             }
 
             // Otherwise require 1/8 buckets to be empty (87.5% load)
             //
             // Be careful when modifying this, calculate_layout relies on the
             // overflow check here.
-            var adjusted_cap = checked(cap * 8 / 7);
+            int adjusted_capacity;
+            switch (capacity)
+            {
+                // 0x01FFFFFF is the max value that would not overflow when *8
+                case <= 0x01FFFFFF:
+                    adjusted_capacity = (int)unchecked(capacity * 8 / 7);
+                    break;
+                // 0x37FFFFFF is the max value that smaller than 0x0400_0000 after *8/7
+                case <= 0x37FFFFFF:
+                    return 0x4000_0000;
+                default:
+                    throw new Exception("capacity overflow");
+            }
 
             // Any overflows will have been caught by the checked_mul. Also, any
             // rounding errors from the division above will be cleaned up by
             // next_power_of_two (which can't overflow because of the previous divison).
-            return nextPowerOfTwo(adjusted_cap);
+            return nextPowerOfTwo(adjusted_capacity);
 
             // TODO: what about this overflow?
             int nextPowerOfTwo(int num)
