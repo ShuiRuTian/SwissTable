@@ -22,7 +22,6 @@ namespace System.Collections.Generic
             _data = data;
         }
 
-        /// Returns a new `BitMask` with all bits inverted.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public IBitMask invert()
         {
@@ -41,7 +40,7 @@ namespace System.Collections.Generic
             // maigc number `16`
             // type of `this._data` is `short`
             // however, it will be tranfrom to `uint` implicitly
-            // So it is 32 - 16 = 16
+            // Delete the additional length
             return BitOperations.LeadingZeroCount(this._data) - 16;
         }
 
@@ -79,7 +78,8 @@ namespace System.Collections.Generic
 
     internal struct Sse2Group : IGroup
     {
-        public int WIDTH => 128 / 8;
+        // 128 bits(_data length) / 8 (byte bits) = 16 bytes
+        public readonly int WIDTH => 128 / 8;
 
         private readonly Vector128<byte> _data;
 
@@ -104,7 +104,7 @@ namespace System.Collections.Generic
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public unsafe IGroup load_aligned(byte* ptr)
         {
-            // uint casting is OK, for ALIGN_WIDTH only use low 16 bits now.
+            // `uint` casting is OK, WIDTH is 16, so checking lowest 4 bits for address align 
             Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
             return new Sse2Group(Sse2.LoadAlignedVector128(ptr));
         }
@@ -112,7 +112,7 @@ namespace System.Collections.Generic
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public unsafe void store_aligned(byte* ptr)
         {
-            // uint casting is OK, for ALIGN_WIDTH only use low 16 bits now.
+            // `uint` casting is OK, WIDTH is 16, so checking lowest 4 bits for address align
             Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
             Sse2.StoreAligned(ptr, this._data);
         }

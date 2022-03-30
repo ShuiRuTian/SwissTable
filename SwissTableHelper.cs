@@ -19,9 +19,11 @@ namespace System.Collections.Generic
             _group = default(FallbackGroup);
         }
 
+        // The abstract that hides all detailed implementations.
+        // Detect the hardware and set this value in the static constructor.
         public static readonly IGroup _group;
 
-        // Control byte value for an empty bucket.
+        /// Control byte value for an empty bucket.
         public const byte EMPTY = 0b1111_1111;
 
         /// Control byte value for a deleted bucket.
@@ -43,18 +45,16 @@ namespace System.Collections.Generic
         /// Primary hash function, used to select the initial bucket to probe from.
         public static int h1(int hash)
         {
-            // On 32-bit platforms we simply ignore the higher hash bits.
             return hash;
         }
 
         /// Secondary hash function, saved in the low 7 bits of the control byte.
         public static byte h2(int hash)
         {
-            // Grab the top 7 bits of the hash. While the hash is normally a full 64-bit
-            // value, some hash functions (such as FxHash) produce a usize result
-            // instead, which means that the top 32 bits are 0 on 32-bit platforms.
-            var top7 = hash >> 25;
-            return (byte)(top7 & 0x7f);
+            // Grab the top 7 bits of the hash.
+            // cast to uint to use `shr` rahther than `sar`, which makes sure the top bit of returned byte is 0.
+            var top7 = (uint)hash >> 25;
+            return (byte)top7;
         }
     }
 }

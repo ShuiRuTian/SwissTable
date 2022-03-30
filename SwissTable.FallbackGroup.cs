@@ -9,8 +9,10 @@ namespace System.Collections.Generic
 {
     internal struct FallbackBitMask : IBitMask
     {
-        // 128 / 8 = 16, so choose ushort
-        // Or maybe we could use `int` with only lowset 16 bits and some trick?
+        // Why use nuint/nint?
+        // For 64 bit platform, we could compare 8 buckets at one time,
+        // For 32 bit platform, we could compare 4 buckets at one time.
+        // And it might be faster to access data for it is aligned, but not sure.
         private readonly nuint  _data;
 
         private static nuint BITMASK_MASK => unchecked((nuint)0x8080_8080_8080_8080);
@@ -71,7 +73,7 @@ namespace System.Collections.Generic
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public IBitMask remove_lowest_bit()
         {
-            return new FallbackBitMask((nuint)(this._data & (this._data - 1)));
+            return new FallbackBitMask(this._data & (this._data - 1));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -83,7 +85,7 @@ namespace System.Collections.Generic
 
     internal struct FallbackGroup : IGroup
     {
-        public unsafe int WIDTH => sizeof(nuint);
+        public unsafe readonly int WIDTH => sizeof(nuint);
 
         private nuint repeat(byte b)
         {

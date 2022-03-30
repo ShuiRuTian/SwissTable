@@ -13,8 +13,11 @@ namespace System.Collections.Generic
         abstract byte[] static_empty();
 
         /// <summary>
-        /// The bytes that the group ocupies
+        /// The bytes that the group data ocupies
         /// </summary>
+        /// <remarks>
+        /// The implementation should have `readonly` modifier
+        /// </remarks>
         int WIDTH { get; }
 
         unsafe IGroup load(byte* ptr);
