@@ -105,7 +105,7 @@ namespace System.Collections.Generic
                             // TODO: Is this safe?
                             fixed (byte* ptr2 = &_controls[0])
                             {
-                                return _group.load_aligned(ptr2)
+                                return _group.load(ptr2)
                                     .match_empty_or_deleted()
                                     .lowest_set_bit_nonzero();
                             }
@@ -124,7 +124,8 @@ namespace System.Collections.Generic
                 _count += 1;
             }
         }
-        // each add/remove will add one version
+
+        // each add/expand/shrink will add one version, note that remove does not add version
         // For Enumerator, if version is changed, one error will be thrown for enumerator should not changed.
         private int _version;
         private RawTableInner rawTable;
@@ -276,6 +277,49 @@ namespace System.Collections.Generic
             return;
         }
 
+
+        public void Add(TKey key, TValue value)
+        {
+            bool modified = TryInsert(key, value, InsertionBehavior.ThrowOnExisting);
+            Debug.Assert(modified); // If there was an existing key and the Add failed, an exception will already have been thrown.
+        }
+
+        public bool ContainsKey(TKey key) =>
+            !Unsafe.IsNullRef(ref FindBucket(key));
+
+        public bool ContainsValue(TValue value)
+        {
+            // TODO: "inline" to get better performance
+            foreach (var item in new ValueCollection(this))
+            {
+                if (EqualityComparer<TValue>.Default.Equals(item, value))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public bool Remove(TKey key)
+        {
+            // TODO: maybe need to duplicate most of code with `Remove(TKey key, out TValue value)` for performance issue, see C# old implementation
+            if (key == null)
+            {
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+            }
+            if (this.rawTable._entries != null)
+            {
+                var index = this.FindBucketIndex(key);
+                if (index != null)
+                {
+                    this.erase(index.Value);
+                    //UpdateBitMaskForEnumerators(index.Value);
+                    return true;
+                }
+            }
+            return false;
+        }
+
         public bool Remove(TKey key, [MaybeNullWhen(false)] out TValue value)
         {
             // TODO: maybe need to duplicate most of code with `Remove(TKey key)` for performance issue, see C# old implementation
@@ -289,6 +333,7 @@ namespace System.Collections.Generic
                 if (index != null)
                 {
                     value = this.erase(index.Value);
+                    //UpdateBitMaskForEnumerators(index.Value);
                     return true;
                 }
             }
@@ -569,46 +614,6 @@ namespace System.Collections.Generic
         #region IDictionary<TKey, TValue>
         ICollection<TKey> IDictionary<TKey, TValue>.Keys => Keys;
         ICollection<TValue> IDictionary<TKey, TValue>.Values => Values;
-
-        public void Add(TKey key, TValue value)
-        {
-            bool modified = TryInsert(key, value, InsertionBehavior.ThrowOnExisting);
-            Debug.Assert(modified); // If there was an existing key and the Add failed, an exception will already have been thrown.
-        }
-
-        public bool ContainsKey(TKey key) =>
-            !Unsafe.IsNullRef(ref FindBucket(key));
-
-        public bool ContainsValue(TValue value)
-        {
-            // TODO: "inline" to get better performance
-            foreach (var item in new ValueCollection(this))
-            {
-                if (EqualityComparer<TValue>.Default.Equals(item, value))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        public bool Remove(TKey key)
-        {
-            // TODO: maybe need to duplicate most of code with `Remove(TKey key, out TValue value)` for performance issue, see C# old implementation
-            if (key == null)
-            {
-                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
-            }
-            if (this.rawTable._entries != null)
-            {
-                var index = this.FindBucketIndex(key);
-                if (index != null)
-                {
-                    this.erase(index.Value);
-                }
-            }
-            return false;
-        }
         #endregion
 
         #region ICollection<KeyValuePair<TKey, TValue>>
@@ -619,8 +624,8 @@ namespace System.Collections.Generic
 
         bool ICollection<KeyValuePair<TKey, TValue>>.Contains(KeyValuePair<TKey, TValue> keyValuePair)
         {
-            ref TValue value = ref FindValue(keyValuePair.Key);
-            if (!Unsafe.IsNullRef(ref value) && EqualityComparer<TValue>.Default.Equals(value, keyValuePair.Value))
+            ref Entry bucket = ref FindBucket(keyValuePair.Key);
+            if (!Unsafe.IsNullRef(ref bucket) && EqualityComparer<TValue>.Default.Equals(bucket.Value, keyValuePair.Value))
             {
                 return true;
             }
@@ -775,6 +780,7 @@ namespace System.Collections.Generic
             this.rawTable.record_item_insert_at(index, old_ctrl, hashCode);
             this.rawTable._entries[index].Key = key;
             this.rawTable._entries[index].Value = value;
+            _version++;
             return true;
         }
 
@@ -814,6 +820,7 @@ namespace System.Collections.Generic
                 dictionary.rawTable.record_item_insert_at(index, old_ctrl, hashCode);
                 dictionary.rawTable._entries[index].Key = key;
                 dictionary.rawTable._entries[index].Value = default!;
+                dictionary._version++;
                 exists = false;
                 return ref dictionary.rawTable._entries[index].Value!;
             }
@@ -922,6 +929,9 @@ namespace System.Collections.Generic
             {
                 return currentCapacity;
             }
+
+            _version++;
+
             if (this.rawTable._entries == null)
             {
                 this.Initialize(capacity);
@@ -1030,7 +1040,12 @@ namespace System.Collections.Generic
 
         internal ref TValue FindValue(TKey key)
         {
+            // TODO: We might choose to dulpcate here too just like FindBucketIndex, but not now.
             ref Entry bucket = ref FindBucket(key);
+            if (Unsafe.IsNullRef(ref bucket))
+            {
+                return ref Unsafe.NullRef<TValue>();
+            }
             return ref bucket.Value;
         }
 
@@ -1044,34 +1059,36 @@ namespace System.Collections.Generic
             var h2_hash = h2(hash);
             var probe_seq = new ProbeSeq(hash, rawTable._bucket_mask);
             ref Entry entry = ref Unsafe.NullRef<Entry>();
+            IGroup group;
             while (true)
             {
                 fixed (byte* ptr = &rawTable._controls[probe_seq.pos])
                 {
-                    var group = _group.load(ptr);
-                    var bitmask = group.match_byte(h2_hash);
-                    // TODO: Iterator and performance, if not influence, iterator would be clearer.
-                    while (bitmask.any_bit_set())
-                    {
-                        Debug.Assert(rawTable._entries != null);
-                        var bit = bitmask.lowest_set_bit()!.Value;
-                        bitmask = bitmask.remove_lowest_bit();
-                        var index = (probe_seq.pos + bit) & rawTable._bucket_mask;
-                        entry = ref rawTable._entries[index];
-                        if (IsKeyEqual(key, entry.Key))
-                        {
-                            return ref entry;
-                        }
-                    }
-                    if (group.match_empty().any_bit_set())
+                    group = _group.load(ptr);
+                }
+                var bitmask = group.match_byte(h2_hash);
+                // TODO: Iterator and performance, if not influence, iterator would be clearer.
+                while (bitmask.any_bit_set())
+                {
+                    Debug.Assert(rawTable._entries != null);
+                    var bit = bitmask.lowest_set_bit()!.Value;
+                    bitmask = bitmask.remove_lowest_bit();
+                    var index = (probe_seq.pos + bit) & rawTable._bucket_mask;
+                    entry = ref rawTable._entries[index];
+                    if (IsKeyEqual(key, entry.Key))
                     {
                         return ref entry;
                     }
+                }
+                if (group.match_empty().any_bit_set())
+                {
+                    return ref Unsafe.NullRef<Entry>();
                 }
                 probe_seq.move_next(rawTable._bucket_mask);
             }
         }
 
+        // TODO: use negative as not find
         private unsafe int? FindBucketIndex(TKey key)
         {
             if (key == null)
@@ -1084,29 +1101,30 @@ namespace System.Collections.Generic
             var h2_hash = h2(hash);
             var probe_seq = new ProbeSeq(hash, rawTable._bucket_mask);
             ref Entry entry = ref Unsafe.NullRef<Entry>();
+            IGroup group;
             while (true)
             {
                 fixed (byte* ptr = &rawTable._controls[probe_seq.pos])
                 {
-                    var group = _group.load(ptr);
-                    var bitmask = group.match_byte(h2_hash);
-                    // TODO: Iterator and performance, if not influence, iterator would be clearer.
-                    while (bitmask.any_bit_set())
+                    group = _group.load(ptr);
+                }
+                var bitmask = group.match_byte(h2_hash);
+                // TODO: Iterator and performance, if not influence, iterator would be clearer.
+                while (bitmask.any_bit_set())
+                {
+                    // there must be set bit
+                    var bit = bitmask.lowest_set_bit()!.Value;
+                    bitmask = bitmask.remove_lowest_bit();
+                    var index = (probe_seq.pos + bit) & rawTable._bucket_mask;
+                    entry = ref rawTable._entries[index];
+                    if (IsKeyEqual(key, entry.Key))
                     {
-                        // there must be set bit
-                        var bit = bitmask.lowest_set_bit()!.Value;
-                        bitmask = bitmask.remove_lowest_bit();
-                        var index = (probe_seq.pos + bit) & rawTable._bucket_mask;
-                        entry = ref rawTable._entries[index];
-                        if (IsKeyEqual(key, entry.Key))
-                        {
-                            return index;
-                        }
+                        return index;
                     }
-                    if (group.match_empty().any_bit_set())
-                    {
-                        return null;
-                    }
+                }
+                if (group.match_empty().any_bit_set())
+                {
+                    return null;
                 }
                 probe_seq.move_next(rawTable._bucket_mask);
             }
@@ -1117,44 +1135,51 @@ namespace System.Collections.Generic
             // Attention, we could not just only set mark to `Deleted` to assume it is deleted, the reference is still here, and GC would not collect it.
             Debug.Assert(is_full(rawTable._controls[index]));
             Debug.Assert(rawTable._entries != null, "entries should be non-null");
-            int index_before = unchecked((index - _group.WIDTH)) & rawTable._bucket_mask;
+            int index_before = unchecked((index - _group.WIDTH) & rawTable._bucket_mask);
             TValue res;
+            IBitMask empty_before;
+            IBitMask empty_after;
             fixed (byte* ptr_before = &rawTable._controls[index_before])
             fixed (byte* ptr = &rawTable._controls[index])
             {
-                var empty_before = _group.load(ptr_before).match_empty();
-                var empty_after = _group.load(ptr).match_empty();
-                byte ctrl;
-                // If we are inside a continuous block of Group::WIDTH full or deleted
-                // cells then a probe window may have seen a full block when trying to
-                // insert. We therefore need to keep that block non-empty so that
-                // lookups will continue searching to the next probe window.
-                //
-                // Note that in this context `leading_zeros` refers to the bytes at the
-                // end of a group, while `trailing_zeros` refers to the bytes at the
-                // begining of a group.
-                if (empty_before.leading_zeros() + empty_after.trailing_zeros() >= _group.WIDTH)
-                {
-                    ctrl = DELETED;
-                }
-                else
-                {
-                    ctrl = EMPTY;
-                    rawTable._growth_left += 1;
-                }
-                this.rawTable.set_ctrl(index, ctrl);
-                rawTable._count -= 1;
-                res = this.rawTable._entries[index].Value;
-                // TODO: maybe we could remove this branch to improve perf. Or maybe CLR has optimised this.
-                if (RuntimeHelpers.IsReferenceOrContainsReferences<TKey>())
-                {
-                    this.rawTable._entries[index].Key = default!;
-                }
-                if (RuntimeHelpers.IsReferenceOrContainsReferences<TValue>())
-                {
-                    this.rawTable._entries[index].Value = default!;
-                }
+                empty_before = _group.load(ptr_before).match_empty();
+                empty_after = _group.load(ptr).match_empty();
             }
+            byte ctrl;
+            // If we are inside a continuous block of Group::WIDTH full or deleted
+            // cells then a probe window may have seen a full block when trying to
+            // insert. We therefore need to keep that block non-empty so that
+            // lookups will continue searching to the next probe window.
+            //
+            // Note that in this context `leading_zeros` refers to the bytes at the
+            // end of a group, while `trailing_zeros` refers to the bytes at the
+            // begining of a group.
+            if (empty_before.leading_zeros() + empty_after.trailing_zeros() >= _group.WIDTH)
+            {
+                ctrl = DELETED;
+            }
+            else
+            {
+                ctrl = EMPTY;
+                rawTable._growth_left += 1;
+            }
+
+            this.rawTable.set_ctrl(index, ctrl);
+            rawTable._count -= 1;
+
+            res = this.rawTable._entries[index].Value;
+
+            // TODO: maybe we could remove this branch to improve perf. Or maybe CLR has optimised this.
+            if (RuntimeHelpers.IsReferenceOrContainsReferences<TKey>())
+            {
+                this.rawTable._entries[index].Key = default!;
+            }
+
+            if (RuntimeHelpers.IsReferenceOrContainsReferences<TValue>())
+            {
+                this.rawTable._entries[index].Value = default!;
+            }
+
             return res;
         }
 
@@ -1260,17 +1285,83 @@ namespace System.Collections.Generic
             }
         }
 
+        //private unsafe void UpdateBitMaskForEnumerators(int removeIndex)
+        //{
+        //    if (selfEnumerators.Count != 0)
+        //    {
+        //        foreach (var enumerator in selfEnumerators)
+        //        {
+        //            if (enumerator.current_ctrl_offset <= removeIndex && removeIndex < enumerator.current_ctrl_offset + _group.WIDTH)
+        //            {
+        //                fixed (byte* ctrl = &rawTable._controls[enumerator.current_ctrl_offset])
+        //                {
+        //                    enumerator.LoadBitMask();
+        //                }
+        //            }
+        //        }
+        //    }
+        //    if (keyEnumerators.Count != 0)
+        //    {
+        //        foreach (var enumerator in selfEnumerators)
+        //        {
+        //            if (enumerator.current_ctrl_offset <= removeIndex && removeIndex < enumerator.current_ctrl_offset + _group.WIDTH)
+        //            {
+        //                fixed (byte* ctrl = &rawTable._controls[enumerator.current_ctrl_offset])
+        //                {
+        //                    enumerator.LoadBitMask();
+        //                }
+        //            }
+        //        }
+        //    }
+
+        //    if (valueEnumerators.Count != 0)
+        //    {
+        //        foreach (var enumerator in selfEnumerators)
+        //        {
+        //            if (enumerator.current_ctrl_offset <= removeIndex && removeIndex < enumerator.current_ctrl_offset + _group.WIDTH)
+        //            {
+        //                fixed (byte* ctrl = &rawTable._controls[enumerator.current_ctrl_offset])
+        //                {
+        //                    enumerator.LoadBitMask();
+        //                }
+        //            }
+        //        }
+        //    }
+        //}
+
+        // Enumerators of this Dictionary, allow "remove" possible when using enumerators.
+        // Personally, I think it is a bit of strange, which introduces inconsistant behavior.
+        // This might be cheap, for usually we just have few enumerators at the same time.
+        //private LinkedList<Enumerator> selfEnumerators = new();
+        //private LinkedList<KeyCollection.Enumerator> keyEnumerators = new();
+        //private LinkedList<ValueCollection.Enumerator> valueEnumerators = new();
+
         public struct Enumerator : IEnumerator<KeyValuePair<TKey, TValue>>, IDictionaryEnumerator
         {
             private readonly MyDictionary<TKey, TValue> _dictionary;
             private readonly int _version;
             private KeyValuePair<TKey, TValue> _current;
             private IBitMask _currentBitMask;
-            private int current_ctrl_offset;
-            private readonly int _getEnumeratorRetType;  // What should Enumerator.Current return?
+            internal int current_ctrl_offset;
+            private readonly int _getEnumeratorRetType;
             private bool isValid; // valid when _current has correct value.
             internal const int DictEntry = 1;
             internal const int KeyValuePair = 2;
+            private readonly bool isArrayAddressAligned; // maybe we should add this to Dictionary rather than Enumerator.
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            internal unsafe void LoadBitMask()
+            {
+                fixed (byte* ctrl = &_dictionary.rawTable._controls[current_ctrl_offset])
+                {
+                    // TODO: Or we should not use load_aligned here? a branch might be more expensive
+                    _currentBitMask = isArrayAddressAligned switch
+                    {
+                        true => _group.load_aligned(ctrl).match_full(),
+                        false => _group.load(ctrl).match_full()
+                    };
+                }
+            }
 
             internal unsafe Enumerator(MyDictionary<TKey, TValue> dictionary, int getEnumeratorRetType)
             {
@@ -1282,8 +1373,15 @@ namespace System.Collections.Generic
                 isValid = false;
                 fixed (byte* ctrl = &_dictionary.rawTable._controls[0])
                 {
-                    _currentBitMask = _group.load_aligned(ctrl).match_full();
+                    isArrayAddressAligned = ((uint)ctrl & (_group.WIDTH - 1)) == 0;
+                    // TODO: Or we should not use load_aligned here? a branch might be more expensive
+                    _currentBitMask = isArrayAddressAligned switch
+                    {
+                        true => _group.load_aligned(ctrl).match_full(),
+                        false => _group.load(ctrl).match_full()
+                    };
                 }
+                //dictionary.selfEnumerators.AddFirst(this);
             }
 
             #region IDictionaryEnumerator
@@ -1369,19 +1467,16 @@ namespace System.Collections.Generic
                         this._current = new KeyValuePair<TKey, TValue>(entry.Key, entry.Value);
                         return true;
                     }
-                    // Shoudl we use closure here? What about the perf? Would CLR optimise this?
                     if (this.current_ctrl_offset + _group.WIDTH >= this._dictionary._buckets)
                     {
                         this._current = default;
                         isValid = false;
+                        //_dictionary.selfEnumerators.Remove(this);
                         return false;
                     }
 
                     this.current_ctrl_offset += _group.WIDTH;
-                    fixed (byte* ctrl = &_dictionary.rawTable._controls[current_ctrl_offset])
-                    {
-                        this._currentBitMask = _group.load_aligned(ctrl).match_full();
-                    }
+                    LoadBitMask();
                 }
             }
             unsafe void IEnumerator.Reset()
@@ -1396,7 +1491,12 @@ namespace System.Collections.Generic
                 isValid = false;
                 fixed (byte* ctrl = &_dictionary.rawTable._controls[0])
                 {
-                    _currentBitMask = _group.load_aligned(ctrl).match_full();
+                    // TODO: Or we should not use load_aligned here? a branch might be more expensive
+                    _currentBitMask = isArrayAddressAligned switch
+                    {
+                        true => _group.load_aligned(ctrl).match_full(),
+                        false => _group.load(ctrl).match_full()
+                    };
                 }
             }
             #endregion
@@ -1531,9 +1631,24 @@ namespace System.Collections.Generic
                 private readonly MyDictionary<TKey, TValue> _dictionary;
                 private readonly int _version;
                 private IBitMask _currentBitMask;
-                private int current_ctrl_offset;
+                internal int current_ctrl_offset;
                 private bool isValid; // valid when _current has correct value.
                 private TKey? _current;
+                private readonly bool isArrayAddressAligned;
+
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                internal unsafe void LoadBitMask()
+                {
+                    fixed (byte* ctrl = &_dictionary.rawTable._controls[current_ctrl_offset])
+                    {
+                        // TODO: Or we should not use load_aligned here? a branch might be more expensive
+                        _currentBitMask = isArrayAddressAligned switch
+                        {
+                            true => _group.load_aligned(ctrl).match_full(),
+                            false => _group.load(ctrl).match_full()
+                        };
+                    }
+                }
 
                 internal unsafe Enumerator(MyDictionary<TKey, TValue> dictionary)
                 {
@@ -1544,8 +1659,16 @@ namespace System.Collections.Generic
                     isValid = false;
                     fixed (byte* ctrl = &_dictionary.rawTable._controls[0])
                     {
-                        _currentBitMask = _group.load_aligned(ctrl).match_full();
+                        isArrayAddressAligned = ((uint)ctrl & (_group.WIDTH - 1)) == 0;
+                        // TODO: Or we should not use load_aligned here? a branch might be more expensive
+                        _currentBitMask = isArrayAddressAligned switch
+                        {
+                            true => _group.load_aligned(ctrl).match_full(),
+                            false => _group.load(ctrl).match_full()
+                        };
                     }
+
+                    //dictionary.keyEnumerators.AddFirst(this);
                 }
 
                 public void Dispose() { }
@@ -1568,19 +1691,15 @@ namespace System.Collections.Generic
                             this._current = entry.Key;
                             return true;
                         }
-                        // Shoudl we use closure here? What about the perf? Would CLR optimise this?
                         if (this.current_ctrl_offset + _group.WIDTH >= this._dictionary._buckets)
                         {
                             this._current = default;
                             isValid = false;
+                            //_dictionary.keyEnumerators.Remove(this);
                             return false;
                         }
-
                         this.current_ctrl_offset += _group.WIDTH;
-                        fixed (byte* ctrl = &_dictionary.rawTable._controls[current_ctrl_offset])
-                        {
-                            this._currentBitMask = _group.load_aligned(ctrl).match_full();
-                        }
+                        LoadBitMask();
                     }
                 }
 
@@ -1609,10 +1728,7 @@ namespace System.Collections.Generic
                     _current = default;
                     current_ctrl_offset = 0;
                     isValid = false;
-                    fixed (byte* ctrl = &_dictionary.rawTable._controls[0])
-                    {
-                        _currentBitMask = _group.load_aligned(ctrl).match_full();
-                    }
+                    LoadBitMask();
                 }
             }
         }
@@ -1744,9 +1860,24 @@ namespace System.Collections.Generic
                 private readonly MyDictionary<TKey, TValue> _dictionary;
                 private readonly int _version;
                 private IBitMask _currentBitMask;
-                private int current_ctrl_offset;
+                internal int current_ctrl_offset;
                 private bool isValid; // valid when _current has correct value.
                 private TValue? _current;
+                private readonly bool isArrayAddressAligned;
+
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                internal unsafe void LoadBitMask()
+                {
+                    fixed (byte* ctrl = &_dictionary.rawTable._controls[current_ctrl_offset])
+                    {
+                        // TODO: Or we should not use load_aligned here? a branch might be more expensive
+                        _currentBitMask = isArrayAddressAligned switch
+                        {
+                            true => _group.load_aligned(ctrl).match_full(),
+                            false => _group.load(ctrl).match_full()
+                        };
+                    }
+                }
 
                 internal unsafe Enumerator(MyDictionary<TKey, TValue> dictionary)
                 {
@@ -1757,8 +1888,15 @@ namespace System.Collections.Generic
                     isValid = false;
                     fixed (byte* ctrl = &_dictionary.rawTable._controls[0])
                     {
-                        _currentBitMask = _group.load_aligned(ctrl).match_full();
+                        isArrayAddressAligned = ((uint)ctrl & (_group.WIDTH - 1)) == 0;
+                        // TODO: Or we should not use load_aligned here? a branch might be more expensive
+                        _currentBitMask = isArrayAddressAligned switch
+                        {
+                            true => _group.load_aligned(ctrl).match_full(),
+                            false => _group.load(ctrl).match_full()
+                        };
                     }
+                    //dictionary.valueEnumerators.AddFirst(this);
                 }
 
                 public void Dispose() { }
@@ -1771,29 +1909,26 @@ namespace System.Collections.Generic
                     }
                     while (true)
                     {
-                        Debug.Assert(this._dictionary.rawTable._entries != null);
                         var lowest_set_bit = this._currentBitMask.lowest_set_bit();
                         if (lowest_set_bit.HasValue)
                         {
+                            Debug.Assert(this._dictionary.rawTable._entries != null);
                             isValid = true;
                             this._currentBitMask = this._currentBitMask.remove_lowest_bit();
                             var entry = this._dictionary.rawTable._entries[this.current_ctrl_offset + lowest_set_bit.Value];
                             this._current = entry.Value;
                             return true;
                         }
-                        // Shoudl we use closure here? What about the perf? Would CLR optimise this?
                         if (this.current_ctrl_offset + _group.WIDTH >= this._dictionary._buckets)
                         {
                             this._current = default;
                             isValid = false;
+                            //_dictionary.valueEnumerators.Remove(this);
                             return false;
                         }
 
                         this.current_ctrl_offset += _group.WIDTH;
-                        fixed (byte* ctrl = &_dictionary.rawTable._controls[current_ctrl_offset])
-                        {
-                            this._currentBitMask = _group.load_aligned(ctrl).match_full();
-                        }
+                        LoadBitMask();
                     }
                 }
 
@@ -1822,10 +1957,7 @@ namespace System.Collections.Generic
                     _current = default;
                     current_ctrl_offset = 0;
                     isValid = false;
-                    fixed (byte* ctrl = &_dictionary.rawTable._controls[0])
-                    {
-                        _currentBitMask = _group.load_aligned(ctrl).match_full();
-                    }
+                    LoadBitMask();
                 }
             }
         }
