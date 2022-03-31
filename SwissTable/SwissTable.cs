@@ -1,4 +1,4 @@
-﻿// Licensed to the .NET Foundation under one or more agreements.
+// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Diagnostics;
@@ -985,8 +985,6 @@ namespace System.Collections.Generic
             {
                 ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
             }
-            Debug.Assert(rawTable._entries != null, "expected entries to be != null");
-
             var hash = GetHashCodeOfKey(key);
             var h2_hash = h2(hash);
             var probe_seq = new ProbeSeq(hash, rawTable._bucket_mask);
@@ -1000,6 +998,7 @@ namespace System.Collections.Generic
                     // TODO: Iterator and performance, if not influence, iterator would be clearer.
                     while (bitmask.any_bit_set())
                     {
+                        Debug.Assert(rawTable._entries != null);
                         // there must be set bit
                         var bit = bitmask.lowest_set_bit()!.Value;
                         bitmask = bitmask.remove_lowest_bit();
