@@ -43,8 +43,6 @@ namespace System.Collections.Generic
 
         public int Count => this.rawTable._count;
 
-        public bool IsReadOnly => false;
-
         // The real space that the swisstable allocated
         // always be the power of 2
         // This means the upper bound is not Int32.MaxValue(0x7FFFF_FFFF), but 0x4000_0000
@@ -114,6 +112,14 @@ namespace System.Collections.Generic
             CloneFromCollection(collection);
         }
 
+        protected MyDictionary(SerializationInfo info, StreamingContext context)
+        {
+            // We can't do anything with the keys and values until the entire graph has been deserialized
+            // and we have a resonable estimate that GetHashCode is not going to fail.  For the time being,
+            // we'll just cache this.  The graph is not valid until OnDeserialization has been called.
+            HashHelpers.SerializationInfoTable.Add(this, info);
+        }
+
         public IEqualityComparer<TKey> Comparer
         {
             get
@@ -169,9 +175,9 @@ namespace System.Collections.Generic
             byte[] oldCtrls = source.rawTable._controls;
             Entry[] oldEntries = source.rawTable._entries;
 
-            // TODO: // TODO: Maybe we could use IBITMASK to accllerate
-            int count = source.rawTable._count;
-            for (int i = 0; i < count; i++)
+            // TODO: Maybe we could use IBITMASK to accllerate
+            int length = source.rawTable._entries.Length;
+            for (int i = 0; i < length; i++)
             {
                 if (is_full(oldCtrls[i]))
                 {
@@ -200,6 +206,9 @@ namespace System.Collections.Generic
             value = default;
             return false;
         }
+
+        public bool TryAdd(TKey key, TValue value) =>
+            TryInsert(key, value, InsertionBehavior.None);
 
         private KeyCollection? _keys;
         public KeyCollection Keys => _keys ??= new KeyCollection(this);
@@ -303,6 +312,8 @@ namespace System.Collections.Generic
         object ICollection.SyncRoot => this;
 
         bool IDictionary.IsFixedSize => false;
+
+        bool IDictionary.IsReadOnly => false;
 
         ICollection IDictionary.Keys => Keys;
 
@@ -512,6 +523,8 @@ namespace System.Collections.Generic
         #endregion
 
         #region ICollection<KeyValuePair<TKey, TValue>>
+        bool ICollection<KeyValuePair<TKey, TValue>>.IsReadOnly => false;
+
         void ICollection<KeyValuePair<TKey, TValue>>.Add(KeyValuePair<TKey, TValue> keyValuePair) =>
             Add(keyValuePair.Key, keyValuePair.Value);
 
@@ -637,6 +650,9 @@ namespace System.Collections.Generic
         /// <returns></returns>
         private bool TryInsert(TKey key, TValue value, InsertionBehavior behavior)
         {
+            // NOTE: this method is mirrored in CollectionsMarshal.GetValueRefOrAddDefault below.
+            // If you make any changes here, make sure to keep that version in sync as well.
+
             ref var bucket = ref this.FindBucket(key);
             // replace
             if (!Unsafe.IsNullRef(ref bucket))
@@ -671,6 +687,47 @@ namespace System.Collections.Generic
             this.rawTable._entries[index].Key = key;
             this.rawTable._entries[index].Value = value;
             return true;
+        }
+
+        /// <summary>
+        /// A helper class containing APIs exposed through <see cref="Runtime.InteropServices.CollectionsMarshal"/>.
+        /// These methods are relatively niche and only used in specific scenarios, so adding them in a separate type avoids
+        /// the additional overhead on each <see cref="Dictionary{TKey, TValue}"/> instantiation, especially in AOT scenarios.
+        /// </summary>
+        internal static class CollectionsMarshalHelper
+        {
+            /// <inheritdoc cref="Runtime.InteropServices.CollectionsMarshal.GetValueRefOrAddDefault{TKey, TValue}(Dictionary{TKey, TValue}, TKey, out bool)"/>
+            public static ref TValue? GetValueRefOrAddDefault(MyDictionary<TKey, TValue> dictionary, TKey key, out bool exists)
+            {
+                // NOTE: this method is mirrored by Dictionary<TKey, TValue>.TryInsert above.
+                // If you make any changes here, make sure to keep that version in sync as well.
+
+                ref var bucket = ref dictionary.FindBucket(key);
+                // replace
+                if (!Unsafe.IsNullRef(ref bucket))
+                {
+                    exists = true;
+                    return ref bucket.Value!;
+                }
+                // insert new
+                var hashCode = dictionary.GetHashCodeOfKey(key);
+                // We can avoid growing the table once we have reached our load
+                // factor if we are replacing a tombstone(Delete). This works since the
+                // number of EMPTY slots does not change in this case.
+                var index = dictionary.find_insert_slot(hashCode);
+                var old_ctrl = dictionary.rawTable._controls[index];
+                if (dictionary.rawTable._growth_left == 0 && special_is_empty(old_ctrl))
+                {
+                    dictionary.EnsureCapacity(dictionary.rawTable._count + 1);
+                    index = dictionary.find_insert_slot(hashCode);
+                }
+                Debug.Assert(dictionary.rawTable._entries != null);
+                dictionary.record_item_insert_at(index, old_ctrl, hashCode);
+                dictionary.rawTable._entries[index].Key = key;
+                dictionary.rawTable._entries[index].Value = default!;
+                exists = false;
+                return ref dictionary.rawTable._entries[index].Value!;
+            }
         }
 
         private void record_item_insert_at(int index, byte old_ctrl, int hash)
@@ -740,9 +797,9 @@ namespace System.Collections.Generic
             byte[] oldCtrls = sourceRawTable._controls;
             Entry[] oldEntries = sourceRawTable._entries;
             Entry[] newEntries = newRawTable._entries;
-            int count = sourceRawTable._count;
+            int length = sourceRawTable._entries.Length;
             // TODO: Maybe we could use IBITMASK to accllerate
-            for (int i = 0; i < count; i++)
+            for (int i = 0; i < length; i++)
             {
                 if (is_full(oldCtrls[i]))
                 {
@@ -1085,7 +1142,7 @@ namespace System.Collections.Generic
             // ---------------------------------------------
             // | [A] | [B] | [EMPTY] | [EMPTY] | [A] | [B] |
             // ---------------------------------------------
-            var index2 = (((index - (_group.WIDTH))) & rawTable._bucket_mask) + _group.WIDTH;
+            var index2 = ((index - _group.WIDTH) & rawTable._bucket_mask) + _group.WIDTH;
             controls[index] = ctrl;
             controls[index2] = ctrl;
         }
@@ -1281,7 +1338,7 @@ namespace System.Collections.Generic
                 }
             }
 
-            void IDisposable.Dispose() { }
+            public void Dispose() { }
 
             public unsafe bool MoveNext()
             {
@@ -1703,7 +1760,7 @@ namespace System.Collections.Generic
                     }
                     while (true)
                     {
-                        Debug.Assert(this._dictionary.rawTable._entries!=null);
+                        Debug.Assert(this._dictionary.rawTable._entries != null);
                         var lowest_set_bit = this._currentBitMask.lowest_set_bit();
                         if (lowest_set_bit.HasValue)
                         {

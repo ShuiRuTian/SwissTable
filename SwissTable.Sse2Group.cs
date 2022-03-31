@@ -104,7 +104,7 @@ namespace System.Collections.Generic
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public unsafe IGroup load_aligned(byte* ptr)
         {
-            // `uint` casting is OK, WIDTH is 16, so checking lowest 4 bits for address align 
+            // `uint` casting is OK, WIDTH is 16, so checking lowest 4 bits for address align
             Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
             return new Sse2Group(Sse2.LoadAlignedVector128(ptr));
         }
