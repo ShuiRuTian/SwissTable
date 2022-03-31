@@ -36,3 +36,6 @@ example:
 ``` ps
 dotnet run -c Release -p:StartupObject=Benchmarks.GenericInline
 ```
+
+### clone the working dotnet/runtime
+git clone --single-branch --branch implement-swisstable-as-hashmap https://github.com/ShuiRuTian/runtime.git --depth=1
