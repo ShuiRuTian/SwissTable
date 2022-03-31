@@ -13,10 +13,9 @@ namespace System.Collections.Generic
         static SwissTableHelper()
         {
             if (Sse2.IsSupported)
-            {
                 _group = default(Sse2Group);
-            }
-            _group = default(FallbackGroup);
+            else
+                _group = default(FallbackGroup);
         }
 
         // The abstract that hides all detailed implementations.

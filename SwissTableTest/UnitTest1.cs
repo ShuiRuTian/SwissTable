@@ -9,6 +9,7 @@ namespace SwissTableTest
         public void Test1()
         {
             var myDictionary = new MyDictionary<string, string>();
+            myDictionary.Add("1","2");
         }
     }
 }
