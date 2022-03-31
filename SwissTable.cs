@@ -1232,14 +1232,14 @@ namespace System.Collections.Generic
         // Q.E.D.
         internal struct ProbeSeq
         {
-            public int pos;
-            public int stride;
-            public ProbeSeq(int hash, int bucket_mask)
+            internal int pos;
+            internal int stride;
+            internal ProbeSeq(int hash, int bucket_mask)
             {
                 this.pos = h1(hash) & bucket_mask;
                 this.stride = 0;
             }
-            public void move_next(int bucket_mask)
+            internal void move_next(int bucket_mask)
             {
                 // We should have found an empty bucket by now and ended the probe.
                 Debug.Assert(this.stride <= bucket_mask, "Went past end of probe sequence");
