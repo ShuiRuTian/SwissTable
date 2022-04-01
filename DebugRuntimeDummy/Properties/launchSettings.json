@@ -1,0 +1,13 @@
+{
+  "profiles": {
+    "DebugRuntimeDummy": {
+      "commandName": "Project"
+    },
+    "Profile 1": {
+      "commandName": "Executable",
+      "executablePath": "D:\\MyRepo\\runtime\\artifacts\\bin\\testhost\\net7.0-windows-Debug-x64\\dotnet.exe",
+      "commandLineArgs": "exec --runtimeconfig System.Collections.Tests.runtimeconfig.json --depsfile System.Collections.Tests.deps.json xunit.console.dll System.Collections.Tests.dll -xml testResults.xml -nologo -notrait category=OuterLoop -notrait category=failing",
+      "workingDirectory": "D:\\MyRepo\\runtime\\artifacts\\bin\\System.Collections.Tests\\Debug\\net7.0"
+    }
+  }
+}

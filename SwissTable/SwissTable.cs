@@ -883,6 +883,7 @@ namespace System.Collections.Generic
             this.rawTable = newTable;
         }
 
+        // Clone data from source to dest, it is not a simple copy, for thumbstone, we only add `full` value
         private void CloneNonEmptyRawTable(in RawTableInner sourceRawTable, ref RawTableInner newRawTable)
         {
             // Note that the we only use this.rawTable.comparer now
@@ -912,6 +913,7 @@ namespace System.Collections.Generic
             }
             newRawTable._growth_left -= sourceRawTable._count;
             newRawTable._count = sourceRawTable._count;
+            newRawTable._comparer = sourceRawTable._comparer;
         }
 
         private void CloneRawTableWithComparer(in RawTableInner sourceRawTable, ref RawTableInner newRawTable, IEqualityComparer<TKey> comparer)
