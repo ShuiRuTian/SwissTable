@@ -28,7 +28,7 @@ namespace System.Collections.Generic
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public IBitMask invert()
         {
-            return new FallbackBitMask((nuint)(this._data ^ BITMASK_MASK));
+            return new FallbackBitMask(this._data ^ BITMASK_MASK);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -80,6 +80,14 @@ namespace System.Collections.Generic
         public int trailing_zeros()
         {
             return BitOperations.TrailingZeroCount(this._data) >> BITMASK_SHIFT;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public IBitMask And(IBitMask bitMask)
+        {
+            Debug.Assert(bitMask is Sse2BitMask);
+            return new FallbackBitMask(this._data & ((FallbackBitMask)bitMask)._data);
+
         }
     }
 

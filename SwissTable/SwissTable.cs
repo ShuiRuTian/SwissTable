@@ -26,6 +26,7 @@ namespace System.Collections.Generic
         private struct RawTableInner
         {
             internal int _bucket_mask;
+            // TODO: If we could make _controls memory aligned(explicit memory layout or _dummy variable?), we could use load_align rather than load to speed up
             internal byte[] _controls;
             internal Entry[]? _entries;
             // Number of elements that can be inserted before we need to grow the table
@@ -128,6 +129,10 @@ namespace System.Collections.Generic
         // each add/expand/shrink will add one version, note that remove does not add version
         // For Enumerator, if version is changed, one error will be thrown for enumerator should not changed.
         private int _version;
+
+        // enumerator will not throw an error if this changed. Instead, it will refresh data.
+        private int _tolerantVersion;
+
         private RawTableInner rawTable;
 
         public int Count => this.rawTable._count;
@@ -138,9 +143,6 @@ namespace System.Collections.Generic
         // TODO: Should we throw an expection if user try to grow again when it has been largest?
         // This is hard(impossible?) to be larger, for the length of array is limited to 0x7FFFF_FFFF
         private int _buckets => this.rawTable._bucket_mask + 1;
-
-        private bool is_empty_singleton => rawTable._bucket_mask == 0;
-
 
         public MyDictionary() : this(0, null) { }
 
@@ -167,11 +169,12 @@ namespace System.Collections.Generic
             // hash buckets become unbalanced.
             if (typeof(TKey) == typeof(string))
             {
-                // IEqualityComparer<string>? stringComparer = NonRandomizedStringEqualityComparer.GetStringComparer(_comparer);
-                // if (stringComparer is not null)
-                // {
-                //     _comparer = (IEqualityComparer<TKey>?)stringComparer;
-                // }
+                // FIXME: Unbcomment this!
+                //IEqualityComparer<string>? stringComparer = NonRandomizedStringEqualityComparer.GetStringComparer(this.rawTable._comparer);
+                //if (stringComparer is not null)
+                //{
+                //    this.rawTable._comparer = (IEqualityComparer<TKey>?)stringComparer;
+                //}
             }
         }
 
@@ -258,7 +261,7 @@ namespace System.Collections.Generic
 
             if (this.rawTable._comparer == source.rawTable._comparer)
             {
-                CloneRawTable(in source.rawTable, ref this.rawTable);
+                CloneNonEmptyRawTable(in source.rawTable, ref this.rawTable);
                 return;
             }
             Debug.Assert(source.rawTable._entries != null);
@@ -313,7 +316,7 @@ namespace System.Collections.Generic
                 if (index != null)
                 {
                     this.erase(index.Value);
-                    //UpdateBitMaskForEnumerators(index.Value);
+                    _tolerantVersion++;
                     return true;
                 }
             }
@@ -333,7 +336,7 @@ namespace System.Collections.Generic
                 if (index != null)
                 {
                     value = this.erase(index.Value);
-                    //UpdateBitMaskForEnumerators(index.Value);
+                    _tolerantVersion++;
                     return true;
                 }
             }
@@ -841,14 +844,17 @@ namespace System.Collections.Generic
             RawTableInner innerTable;
             if (realisticCapacity == 0)
             {
-                innerTable = new_in();
+                innerTable = newEmptyDictionary();
+                // copy everything but comparer.
+                this.rawTable._bucket_mask = innerTable._bucket_mask;
                 this.rawTable._controls = innerTable._controls;
                 this.rawTable._entries = innerTable._entries;
+                this.rawTable._count = innerTable._count;
+                this.rawTable._growth_left = innerTable._growth_left;
                 return;
             }
             var idealCapacity = capacity_to_buckets(realisticCapacity);
-            innerTable = new_uninitialized(idealCapacity);
-            Array.Fill(innerTable._controls, EMPTY);
+            innerTable = newNormalDictionary(idealCapacity);
             this.rawTable._bucket_mask = innerTable._bucket_mask;
             this.rawTable._controls = innerTable._controls;
             this.rawTable._entries = innerTable._entries;
@@ -858,27 +864,30 @@ namespace System.Collections.Generic
 
         // TODO: check whether we need NonRandomizedStringEqualityComparer
         // If we need rehash, we should learn from rust.
-        // this function only grow for now.
+        // resize to 0 capaciry is a special simple case, Which is not handled here.
         private void Resize(int realisticCapacity)
         {
             Debug.Assert(this.rawTable._entries != null);
             var idealCapacity = capacity_to_buckets(realisticCapacity);
-            Debug.Assert(idealCapacity >= rawTable._entries.Length);
-            var newTable = new_uninitialized(idealCapacity);
+            ResizeWorker(idealCapacity);
+        }
+
+        private void ResizeWorker(int idealEntryLength)
+        {
+            Debug.Assert(idealEntryLength >= rawTable._count);
+            var newTable = newNormalDictionary(idealEntryLength);
             Debug.Assert(newTable._entries != null);
-            Array.Fill(newTable._controls, EMPTY);
-            CloneRawTable(in this.rawTable, ref newTable);
+            CloneNonEmptyRawTable(in this.rawTable, ref newTable);
             this.rawTable = newTable;
         }
 
-        // Caller need to make sure `newRawTable` is clean and have enough capacity
-        private void CloneRawTable(in RawTableInner sourceRawTable, ref RawTableInner newRawTable)
+        private void CloneNonEmptyRawTable(in RawTableInner sourceRawTable, ref RawTableInner newRawTable)
         {
-            // Note that the we only use this.rawTable.comparer
-            Debug.Assert(sourceRawTable._entries is not null);
-            Debug.Assert(newRawTable._entries is not null);
-            Debug.Assert(newRawTable._entries.Length >= sourceRawTable._count);
+            // Note that the we only use this.rawTable.comparer now
+            Debug.Assert(sourceRawTable._entries != null);
+            Debug.Assert(newRawTable._entries != null);
             Debug.Assert(newRawTable._count == 0);
+            Debug.Assert(newRawTable._growth_left >= sourceRawTable._count);
 
             // We can use a simple version of insert() here since:
             // - there are no DELETED entries.
@@ -911,7 +920,7 @@ namespace System.Collections.Generic
             Debug.Assert(newRawTable._count == 0);
             var sourceCopy = sourceRawTable;
             sourceCopy._comparer = comparer;
-            CloneRawTable(in sourceCopy, ref newRawTable);
+            CloneNonEmptyRawTable(in sourceCopy, ref newRawTable);
         }
 
         /// <summary>
@@ -972,18 +981,24 @@ namespace System.Collections.Generic
             {
                 ThrowHelper.ThrowArgumentOutOfRangeException(ExceptionArgument.capacity);
             }
+
             if (capacity == 0)
             {
+                _version++;
+                // TODO: No need to initialize if _entry is null.
                 this.Initialize(capacity);
-            }
-            var idealCap = capacity_to_buckets(capacity);
-            int currentCapacity = this.rawTable._count + this.rawTable._growth_left;
-            if (idealCap >= currentCapacity)
-            {
                 return;
             }
-            _version++;
-            this.Resize(capacity);
+
+            var idealBuckets = capacity_to_buckets(capacity);
+
+            // TODO: if the length is same, we might not need to resize, reference `rehash_in_place` in rust implementation.
+            if (idealBuckets <= this._buckets)
+            {
+                _version++;
+                this.ResizeWorker(idealBuckets);
+                return;
+            }
         }
 
         /// <summary>
@@ -994,8 +1009,7 @@ namespace System.Collections.Generic
         /// leave the data pointer dangling since that bucket is never written to
         /// due to our load factor forcing us to always have at least 1 free bucket.
         /// </summary>
-        // TODO: Maybe ref to improve performance?
-        private static RawTableInner new_in()
+        private static RawTableInner newEmptyDictionary()
         {
             // unlike rust, maybe we should convert this to a forever lived array that is allocated with specific value.
             byte[] _controls = _group.static_empty();
@@ -1012,15 +1026,16 @@ namespace System.Collections.Generic
         /// <summary>
         /// Allocates a new hash table with the given number of buckets.
         ///
-        /// The control bytes are left uninitialized.
+        /// The control bytes are initialized with EMPTY.
         /// </summary>
         // unlike rust, we never cares about out of memory
         // TODO: Maybe ref to improve performance?
-        private static RawTableInner new_uninitialized(int buckets)
+        private static RawTableInner newNormalDictionary(int buckets)
         {
             Debug.Assert(BitOperations.IsPow2(buckets));
             byte[] _controls = new byte[buckets + _group.WIDTH];
             Entry[] _entries = new Entry[buckets];
+            Array.Fill(_controls, EMPTY);
             return new RawTableInner
             {
                 _bucket_mask = buckets - 1,
@@ -1285,61 +1300,11 @@ namespace System.Collections.Generic
             }
         }
 
-        //private unsafe void UpdateBitMaskForEnumerators(int removeIndex)
-        //{
-        //    if (selfEnumerators.Count != 0)
-        //    {
-        //        foreach (var enumerator in selfEnumerators)
-        //        {
-        //            if (enumerator.current_ctrl_offset <= removeIndex && removeIndex < enumerator.current_ctrl_offset + _group.WIDTH)
-        //            {
-        //                fixed (byte* ctrl = &rawTable._controls[enumerator.current_ctrl_offset])
-        //                {
-        //                    enumerator.LoadBitMask();
-        //                }
-        //            }
-        //        }
-        //    }
-        //    if (keyEnumerators.Count != 0)
-        //    {
-        //        foreach (var enumerator in selfEnumerators)
-        //        {
-        //            if (enumerator.current_ctrl_offset <= removeIndex && removeIndex < enumerator.current_ctrl_offset + _group.WIDTH)
-        //            {
-        //                fixed (byte* ctrl = &rawTable._controls[enumerator.current_ctrl_offset])
-        //                {
-        //                    enumerator.LoadBitMask();
-        //                }
-        //            }
-        //        }
-        //    }
-
-        //    if (valueEnumerators.Count != 0)
-        //    {
-        //        foreach (var enumerator in selfEnumerators)
-        //        {
-        //            if (enumerator.current_ctrl_offset <= removeIndex && removeIndex < enumerator.current_ctrl_offset + _group.WIDTH)
-        //            {
-        //                fixed (byte* ctrl = &rawTable._controls[enumerator.current_ctrl_offset])
-        //                {
-        //                    enumerator.LoadBitMask();
-        //                }
-        //            }
-        //        }
-        //    }
-        //}
-
-        // Enumerators of this Dictionary, allow "remove" possible when using enumerators.
-        // Personally, I think it is a bit of strange, which introduces inconsistant behavior.
-        // This might be cheap, for usually we just have few enumerators at the same time.
-        //private LinkedList<Enumerator> selfEnumerators = new();
-        //private LinkedList<KeyCollection.Enumerator> keyEnumerators = new();
-        //private LinkedList<ValueCollection.Enumerator> valueEnumerators = new();
-
         public struct Enumerator : IEnumerator<KeyValuePair<TKey, TValue>>, IDictionaryEnumerator
         {
             private readonly MyDictionary<TKey, TValue> _dictionary;
             private readonly int _version;
+            private readonly int _tolerantVersion;
             private KeyValuePair<TKey, TValue> _current;
             private IBitMask _currentBitMask;
             internal int current_ctrl_offset;
@@ -1347,19 +1312,14 @@ namespace System.Collections.Generic
             private bool isValid; // valid when _current has correct value.
             internal const int DictEntry = 1;
             internal const int KeyValuePair = 2;
-            private readonly bool isArrayAddressAligned; // maybe we should add this to Dictionary rather than Enumerator.
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            internal unsafe void LoadBitMask()
+            internal unsafe IBitMask LoadBitMask()
             {
                 fixed (byte* ctrl = &_dictionary.rawTable._controls[current_ctrl_offset])
                 {
                     // TODO: Or we should not use load_aligned here? a branch might be more expensive
-                    _currentBitMask = isArrayAddressAligned switch
-                    {
-                        true => _group.load_aligned(ctrl).match_full(),
-                        false => _group.load(ctrl).match_full()
-                    };
+                    return _group.load(ctrl).match_full();
                 }
             }
 
@@ -1367,21 +1327,16 @@ namespace System.Collections.Generic
             {
                 _dictionary = dictionary;
                 _version = dictionary._version;
+                _tolerantVersion = dictionary._tolerantVersion;
                 _getEnumeratorRetType = getEnumeratorRetType;
                 _current = default;
                 current_ctrl_offset = 0;
                 isValid = false;
                 fixed (byte* ctrl = &_dictionary.rawTable._controls[0])
                 {
-                    isArrayAddressAligned = ((uint)ctrl & (_group.WIDTH - 1)) == 0;
                     // TODO: Or we should not use load_aligned here? a branch might be more expensive
-                    _currentBitMask = isArrayAddressAligned switch
-                    {
-                        true => _group.load_aligned(ctrl).match_full(),
-                        false => _group.load(ctrl).match_full()
-                    };
+                    _currentBitMask = _group.load(ctrl).match_full();
                 }
-                //dictionary.selfEnumerators.AddFirst(this);
             }
 
             #region IDictionaryEnumerator
@@ -1455,6 +1410,11 @@ namespace System.Collections.Generic
                 {
                     ThrowHelper.ThrowInvalidOperationException_InvalidOperation_EnumFailedVersion();
                 }
+                if (_tolerantVersion != _dictionary._tolerantVersion)
+                {
+                    var newBitMak = LoadBitMask();
+                    this._currentBitMask = this._currentBitMask.And(newBitMak);
+                }
                 while (true)
                 {
                     var lowest_set_bit = this._currentBitMask.lowest_set_bit();
@@ -1471,12 +1431,11 @@ namespace System.Collections.Generic
                     {
                         this._current = default;
                         isValid = false;
-                        //_dictionary.selfEnumerators.Remove(this);
                         return false;
                     }
 
                     this.current_ctrl_offset += _group.WIDTH;
-                    LoadBitMask();
+                    this._currentBitMask = LoadBitMask();
                 }
             }
             unsafe void IEnumerator.Reset()
@@ -1492,11 +1451,7 @@ namespace System.Collections.Generic
                 fixed (byte* ctrl = &_dictionary.rawTable._controls[0])
                 {
                     // TODO: Or we should not use load_aligned here? a branch might be more expensive
-                    _currentBitMask = isArrayAddressAligned switch
-                    {
-                        true => _group.load_aligned(ctrl).match_full(),
-                        false => _group.load(ctrl).match_full()
-                    };
+                    _currentBitMask = _group.load(ctrl).match_full();
                 }
             }
             #endregion
@@ -1630,23 +1585,19 @@ namespace System.Collections.Generic
             {
                 private readonly MyDictionary<TKey, TValue> _dictionary;
                 private readonly int _version;
+                private readonly int _tolerantVersion;
                 private IBitMask _currentBitMask;
                 internal int current_ctrl_offset;
                 private bool isValid; // valid when _current has correct value.
                 private TKey? _current;
-                private readonly bool isArrayAddressAligned;
 
                 [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                internal unsafe void LoadBitMask()
+                internal unsafe IBitMask LoadBitMask()
                 {
                     fixed (byte* ctrl = &_dictionary.rawTable._controls[current_ctrl_offset])
                     {
                         // TODO: Or we should not use load_aligned here? a branch might be more expensive
-                        _currentBitMask = isArrayAddressAligned switch
-                        {
-                            true => _group.load_aligned(ctrl).match_full(),
-                            false => _group.load(ctrl).match_full()
-                        };
+                        return _group.load(ctrl).match_full();
                     }
                 }
 
@@ -1654,21 +1605,15 @@ namespace System.Collections.Generic
                 {
                     _dictionary = dictionary;
                     _version = dictionary._version;
+                    _tolerantVersion = dictionary._tolerantVersion;
                     _current = default;
                     current_ctrl_offset = 0;
                     isValid = false;
                     fixed (byte* ctrl = &_dictionary.rawTable._controls[0])
                     {
-                        isArrayAddressAligned = ((uint)ctrl & (_group.WIDTH - 1)) == 0;
                         // TODO: Or we should not use load_aligned here? a branch might be more expensive
-                        _currentBitMask = isArrayAddressAligned switch
-                        {
-                            true => _group.load_aligned(ctrl).match_full(),
-                            false => _group.load(ctrl).match_full()
-                        };
+                        _currentBitMask = _group.load(ctrl).match_full();
                     }
-
-                    //dictionary.keyEnumerators.AddFirst(this);
                 }
 
                 public void Dispose() { }
@@ -1678,6 +1623,11 @@ namespace System.Collections.Generic
                     if (_version != _dictionary._version)
                     {
                         ThrowHelper.ThrowInvalidOperationException_InvalidOperation_EnumFailedVersion();
+                    }
+                    if (_tolerantVersion != _dictionary._tolerantVersion)
+                    {
+                        var newBitMak = LoadBitMask();
+                        this._currentBitMask = this._currentBitMask.And(newBitMak);
                     }
                     while (true)
                     {
@@ -1695,11 +1645,10 @@ namespace System.Collections.Generic
                         {
                             this._current = default;
                             isValid = false;
-                            //_dictionary.keyEnumerators.Remove(this);
                             return false;
                         }
                         this.current_ctrl_offset += _group.WIDTH;
-                        LoadBitMask();
+                        this._currentBitMask = LoadBitMask();
                     }
                 }
 
@@ -1728,7 +1677,7 @@ namespace System.Collections.Generic
                     _current = default;
                     current_ctrl_offset = 0;
                     isValid = false;
-                    LoadBitMask();
+                    this._currentBitMask = LoadBitMask();
                 }
             }
         }
@@ -1859,23 +1808,19 @@ namespace System.Collections.Generic
             {
                 private readonly MyDictionary<TKey, TValue> _dictionary;
                 private readonly int _version;
+                private readonly int _tolerantVersion;
                 private IBitMask _currentBitMask;
                 internal int current_ctrl_offset;
                 private bool isValid; // valid when _current has correct value.
                 private TValue? _current;
-                private readonly bool isArrayAddressAligned;
 
                 [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                internal unsafe void LoadBitMask()
+                internal unsafe IBitMask LoadBitMask()
                 {
                     fixed (byte* ctrl = &_dictionary.rawTable._controls[current_ctrl_offset])
                     {
                         // TODO: Or we should not use load_aligned here? a branch might be more expensive
-                        _currentBitMask = isArrayAddressAligned switch
-                        {
-                            true => _group.load_aligned(ctrl).match_full(),
-                            false => _group.load(ctrl).match_full()
-                        };
+                        return _group.load(ctrl).match_full();
                     }
                 }
 
@@ -1883,20 +1828,15 @@ namespace System.Collections.Generic
                 {
                     _dictionary = dictionary;
                     _version = dictionary._version;
+                    _tolerantVersion = dictionary._tolerantVersion;
                     _current = default;
                     current_ctrl_offset = 0;
                     isValid = false;
-                    fixed (byte* ctrl = &_dictionary.rawTable._controls[0])
+                    fixed (byte* ctrl = &_dictionary.rawTable._controls[current_ctrl_offset])
                     {
-                        isArrayAddressAligned = ((uint)ctrl & (_group.WIDTH - 1)) == 0;
                         // TODO: Or we should not use load_aligned here? a branch might be more expensive
-                        _currentBitMask = isArrayAddressAligned switch
-                        {
-                            true => _group.load_aligned(ctrl).match_full(),
-                            false => _group.load(ctrl).match_full()
-                        };
+                        this._currentBitMask = _group.load(ctrl).match_full();
                     }
-                    //dictionary.valueEnumerators.AddFirst(this);
                 }
 
                 public void Dispose() { }
@@ -1906,6 +1846,11 @@ namespace System.Collections.Generic
                     if (_version != _dictionary._version)
                     {
                         ThrowHelper.ThrowInvalidOperationException_InvalidOperation_EnumFailedVersion();
+                    }
+                    if (_tolerantVersion != _dictionary._tolerantVersion)
+                    {
+                        var newBitMak = LoadBitMask();
+                        this._currentBitMask = this._currentBitMask.And(newBitMak);
                     }
                     while (true)
                     {
@@ -1923,12 +1868,11 @@ namespace System.Collections.Generic
                         {
                             this._current = default;
                             isValid = false;
-                            //_dictionary.valueEnumerators.Remove(this);
                             return false;
                         }
 
                         this.current_ctrl_offset += _group.WIDTH;
-                        LoadBitMask();
+                        this._currentBitMask = LoadBitMask();
                     }
                 }
 
@@ -1957,7 +1901,7 @@ namespace System.Collections.Generic
                     _current = default;
                     current_ctrl_offset = 0;
                     isValid = false;
-                    LoadBitMask();
+                    this._currentBitMask = LoadBitMask();
                 }
             }
         }

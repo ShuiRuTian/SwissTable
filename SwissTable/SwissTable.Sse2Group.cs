@@ -15,7 +15,7 @@ namespace System.Collections.Generic
 
         // 128 / 8 = 16, so choose ushort
         // Or maybe we could use `int` with only lowset 16 bits and some trick?
-        private readonly ushort _data;
+        internal readonly ushort _data;
 
         internal Sse2BitMask(ushort data)
         {
@@ -73,6 +73,13 @@ namespace System.Collections.Generic
         public int trailing_zeros()
         {
             return BitOperations.TrailingZeroCount(this._data);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public IBitMask And(IBitMask bitMask)
+        {
+            Debug.Assert(bitMask is Sse2BitMask);
+            return new Sse2BitMask((ushort)(this._data & ((Sse2BitMask)bitMask)._data));
         }
     }
 

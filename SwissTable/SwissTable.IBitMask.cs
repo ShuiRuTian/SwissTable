@@ -31,6 +31,13 @@ namespace System.Collections.Generic
         IBitMask remove_lowest_bit();
 
         /// <summary>
+        /// Returns a new `BitMask` with the internal data logic and(&).
+        /// </summary>
+        /// <param name="bitMask"> must be the same type with caller</param>
+        /// <returns></returns>
+        IBitMask And(IBitMask bitMask);
+
+        /// <summary>
         /// Returns whether the `BitMask` has at least one set bit.
         /// </summary>
         /// <returns></returns>
