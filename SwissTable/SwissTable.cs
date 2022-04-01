@@ -10,17 +10,20 @@ using static System.Collections.Generic.SwissTableHelper;
 
 namespace System.Collections.Generic
 {
-    // [DebuggerTypeProxy(typeof(IDictionaryDebugView<,>))]
+    [DebuggerTypeProxy(typeof(IDictionaryDebugView<,>))]
     [DebuggerDisplay("Count = {Count}")]
     [Serializable]
     [TypeForwardedFrom("mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089")]
-    public partial class MyDictionary<TKey, TValue> : IDictionary<TKey, TValue>, IDictionary, IReadOnlyDictionary<TKey, TValue>, ISerializable, IDeserializationCallback where TKey : notnull
+    public class Dictionary<TKey, TValue> : IDictionary<TKey, TValue>, IDictionary, IReadOnlyDictionary<TKey, TValue>, ISerializable, IDeserializationCallback where TKey : notnull
     {
         // Term define:
         //   Capacity: The maximum number of non-empty items that a hash table can hold before scaling. (come from `EnsureCapacity`)
         //   count: the real count of stored items
         //   growth_left: due to the existing of tombstone, non-empty does not mean there is indeed a value.
         //   bucket: `Entry` in the code, which could hold a key-value pair
+
+        // capacity = count + grow_left
+        // entries.Length = capacity + tombstone + left_by_load_factor
 
         // this contains all meaningfull data but _version
         private struct RawTableInner
@@ -144,13 +147,13 @@ namespace System.Collections.Generic
         // This is hard(impossible?) to be larger, for the length of array is limited to 0x7FFFF_FFFF
         private int _buckets => this.rawTable._bucket_mask + 1;
 
-        public MyDictionary() : this(0, null) { }
+        public Dictionary() : this(0, null) { }
 
-        public MyDictionary(int capacity) : this(capacity, null) { }
+        public Dictionary(int capacity) : this(capacity, null) { }
 
-        public MyDictionary(IEqualityComparer<TKey>? comparer) : this(0, comparer) { }
+        public Dictionary(IEqualityComparer<TKey>? comparer) : this(0, comparer) { }
 
-        public MyDictionary(int capacity, IEqualityComparer<TKey>? comparer)
+        public Dictionary(int capacity, IEqualityComparer<TKey>? comparer)
         {
             if (capacity < 0)
             {
@@ -169,18 +172,17 @@ namespace System.Collections.Generic
             // hash buckets become unbalanced.
             if (typeof(TKey) == typeof(string))
             {
-                // FIXME: Unbcomment this!
-                //IEqualityComparer<string>? stringComparer = NonRandomizedStringEqualityComparer.GetStringComparer(this.rawTable._comparer);
-                //if (stringComparer is not null)
-                //{
-                //    this.rawTable._comparer = (IEqualityComparer<TKey>?)stringComparer;
-                //}
+                IEqualityComparer<string>? stringComparer = NonRandomizedStringEqualityComparer.GetStringComparer(this.rawTable._comparer);
+                if (stringComparer is not null)
+                {
+                    this.rawTable._comparer = (IEqualityComparer<TKey>?)stringComparer;
+                }
             }
         }
 
-        public MyDictionary(IDictionary<TKey, TValue> dictionary) : this(dictionary, null) { }
+        public Dictionary(IDictionary<TKey, TValue> dictionary) : this(dictionary, null) { }
 
-        public MyDictionary(IDictionary<TKey, TValue> dictionary, IEqualityComparer<TKey>? comparer) :
+        public Dictionary(IDictionary<TKey, TValue> dictionary, IEqualityComparer<TKey>? comparer) :
             this(dictionary != null ? dictionary.Count : 0, comparer)
         {
             if (dictionary == null)
@@ -191,9 +193,9 @@ namespace System.Collections.Generic
             CloneFromCollection(dictionary);
         }
 
-        public MyDictionary(IEnumerable<KeyValuePair<TKey, TValue>> collection) : this(collection, null) { }
+        public Dictionary(IEnumerable<KeyValuePair<TKey, TValue>> collection) : this(collection, null) { }
 
-        public MyDictionary(IEnumerable<KeyValuePair<TKey, TValue>> collection, IEqualityComparer<TKey>? comparer) :
+        public Dictionary(IEnumerable<KeyValuePair<TKey, TValue>> collection, IEqualityComparer<TKey>? comparer) :
             this((collection as ICollection<KeyValuePair<TKey, TValue>>)?.Count ?? 0, comparer)
         {
             if (collection == null)
@@ -204,12 +206,12 @@ namespace System.Collections.Generic
             CloneFromCollection(collection);
         }
 
-        protected MyDictionary(SerializationInfo info, StreamingContext context)
+        protected Dictionary(SerializationInfo info, StreamingContext context)
         {
             // We can't do anything with the keys and values until the entire graph has been deserialized
             // and we have a resonable estimate that GetHashCode is not going to fail.  For the time being,
             // we'll just cache this.  The graph is not valid until OnDeserialization has been called.
-            // HashHelpers.SerializationInfoTable.Add(this, info);
+            HashHelpers.SerializationInfoTable.Add(this, info);
         }
 
         public IEqualityComparer<TKey> Comparer
@@ -234,9 +236,9 @@ namespace System.Collections.Generic
             // avoid the enumerator allocation and overhead by looping through the entries array directly.
             // We only do this when dictionary is Dictionary<TKey,TValue> and not a subclass, to maintain
             // back-compat with subclasses that may have overridden the enumerator behavior.
-            if (collection.GetType() == typeof(MyDictionary<TKey, TValue>))
+            if (collection.GetType() == typeof(Dictionary<TKey, TValue>))
             {
-                MyDictionary<TKey, TValue> source = (MyDictionary<TKey, TValue>)collection;
+                Dictionary<TKey, TValue> source = (Dictionary<TKey, TValue>)collection;
 
                 CloneFromDictionary(source);
                 return;
@@ -249,7 +251,7 @@ namespace System.Collections.Generic
             }
         }
 
-        private void CloneFromDictionary(MyDictionary<TKey, TValue> source)
+        private void CloneFromDictionary(Dictionary<TKey, TValue> source)
         {
             if (source.Count == 0)
             {
@@ -395,7 +397,7 @@ namespace System.Collections.Generic
 
                 Array.Fill(rawTable._controls, EMPTY);
                 rawTable._count = 0;
-                rawTable._growth_left = MyDictionary<TKey, TValue>.bucket_mask_to_capacity(rawTable._bucket_mask);
+                rawTable._growth_left = Dictionary<TKey, TValue>.bucket_mask_to_capacity(rawTable._bucket_mask);
                 // TODO: maybe we could remove this branch to improve perf. Or maybe CLR has optimised this.
                 if (RuntimeHelpers.IsReferenceOrContainsReferences<TValue>()
                     || RuntimeHelpers.IsReferenceOrContainsReferences<TKey>())
@@ -678,7 +680,7 @@ namespace System.Collections.Generic
 
             info.AddValue(VersionName, _version);
             info.AddValue(ComparerName, Comparer, typeof(IEqualityComparer<TKey>));
-            info.AddValue(HashSizeName, rawTable._entries == null ? 0 : rawTable._entries.Length);
+            info.AddValue(HashSizeName, bucket_mask_to_capacity(rawTable._bucket_mask));
 
             if (rawTable._entries != null)
             {
@@ -691,41 +693,41 @@ namespace System.Collections.Generic
 
         public virtual void OnDeserialization(object? sender)
         {
-            //HashHelpers.SerializationInfoTable.TryGetValue(this, out SerializationInfo? siInfo);
-            //if (siInfo == null)
-            //{
-            //    // We can return immediately if this function is called twice.
-            //    // Note we remove the serialization info from the table at the end of this method.
-            //    return;
-            //}
+            HashHelpers.SerializationInfoTable.TryGetValue(this, out SerializationInfo? siInfo);
+            if (siInfo == null)
+            {
+                // We can return immediately if this function is called twice.
+                // Note we remove the serialization info from the table at the end of this method.
+                return;
+            }
 
-            //int realVersion = siInfo.GetInt32(VersionName);
-            //int hashsize = siInfo.GetInt32(HashSizeName);
-            //rawTable._comparer = (IEqualityComparer<TKey>)siInfo.GetValue(ComparerName, typeof(IEqualityComparer<TKey>))!; // When serialized if comparer is null, we use the default.
-            //Initialize(hashsize);
+            int realVersion = siInfo.GetInt32(VersionName);
+            int hashsize = siInfo.GetInt32(HashSizeName);
+            rawTable._comparer = (IEqualityComparer<TKey>)siInfo.GetValue(ComparerName, typeof(IEqualityComparer<TKey>))!; // When serialized if comparer is null, we use the default.
+            Initialize(hashsize);
 
-            //if (hashsize != 0)
-            //{
-            //    KeyValuePair<TKey, TValue>[]? array = (KeyValuePair<TKey, TValue>[]?)
-            //        siInfo.GetValue(KeyValuePairsName, typeof(KeyValuePair<TKey, TValue>[]));
+            if (hashsize != 0)
+            {
+                KeyValuePair<TKey, TValue>[]? array = (KeyValuePair<TKey, TValue>[]?)
+                    siInfo.GetValue(KeyValuePairsName, typeof(KeyValuePair<TKey, TValue>[]));
 
-            //    if (array == null)
-            //    {
-            //        ThrowHelper.ThrowSerializationException(ExceptionResource.Serialization_MissingKeys);
-            //    }
+                if (array == null)
+                {
+                    ThrowHelper.ThrowSerializationException(ExceptionResource.Serialization_MissingKeys);
+                }
 
-            //    for (int i = 0; i < array.Length; i++)
-            //    {
-            //        if (array[i].Key == null)
-            //        {
-            //            ThrowHelper.ThrowSerializationException(ExceptionResource.Serialization_NullKey);
-            //        }
+                for (int i = 0; i < array.Length; i++)
+                {
+                    if (array[i].Key == null)
+                    {
+                        ThrowHelper.ThrowSerializationException(ExceptionResource.Serialization_NullKey);
+                    }
 
-            //        Add(array[i].Key, array[i].Value);
-            //    }
-            //}
-            //_version = realVersion;
-            //HashHelpers.SerializationInfoTable.Remove(this);
+                    Add(array[i].Key, array[i].Value);
+                }
+            }
+            _version = realVersion;
+            HashHelpers.SerializationInfoTable.Remove(this);
         }
         #endregion
 
@@ -795,7 +797,7 @@ namespace System.Collections.Generic
         public static class CollectionsMarshalHelper
         {
             /// <inheritdoc cref="Runtime.InteropServices.CollectionsMarshal.GetValueRefOrAddDefault{TKey, TValue}(Dictionary{TKey, TValue}, TKey, out bool)"/>
-            public static ref TValue? GetValueRefOrAddDefault(MyDictionary<TKey, TValue> dictionary, TKey key, out bool exists)
+            public static ref TValue? GetValueRefOrAddDefault(Dictionary<TKey, TValue> dictionary, TKey key, out bool exists)
             {
                 // NOTE: this method is mirrored by Dictionary<TKey, TValue>.TryInsert above.
                 // If you make any changes here, make sure to keep that version in sync as well.
@@ -1041,7 +1043,7 @@ namespace System.Collections.Generic
                 _bucket_mask = buckets - 1,
                 _controls = _controls,
                 _entries = _entries,
-                _growth_left = MyDictionary<TKey, TValue>.bucket_mask_to_capacity(buckets - 1),
+                _growth_left = Dictionary<TKey, TValue>.bucket_mask_to_capacity(buckets - 1),
                 _count = 0
             };
         }
@@ -1198,7 +1200,6 @@ namespace System.Collections.Generic
             return res;
         }
 
-        // TODO: overflow, what about cap > uint.Max
         /// Returns the number of buckets needed to hold the given number of items,
         /// taking the maximum load factor into account.
         private static int capacity_to_buckets(int cap)
@@ -1239,7 +1240,6 @@ namespace System.Collections.Generic
             // next_power_of_two (which can't overflow because of the previous divison).
             return nextPowerOfTwo(adjusted_capacity);
 
-            // TODO: what about this overflow?
             static int nextPowerOfTwo(int num)
             {
                 num |= num >> 1;
@@ -1302,7 +1302,7 @@ namespace System.Collections.Generic
 
         public struct Enumerator : IEnumerator<KeyValuePair<TKey, TValue>>, IDictionaryEnumerator
         {
-            private readonly MyDictionary<TKey, TValue> _dictionary;
+            private readonly Dictionary<TKey, TValue> _dictionary;
             private readonly int _version;
             private readonly int _tolerantVersion;
             private KeyValuePair<TKey, TValue> _current;
@@ -1323,7 +1323,7 @@ namespace System.Collections.Generic
                 }
             }
 
-            internal unsafe Enumerator(MyDictionary<TKey, TValue> dictionary, int getEnumeratorRetType)
+            internal unsafe Enumerator(Dictionary<TKey, TValue> dictionary, int getEnumeratorRetType)
             {
                 _dictionary = dictionary;
                 _version = dictionary._version;
@@ -1457,13 +1457,13 @@ namespace System.Collections.Generic
             #endregion
         }
 
-        // [DebuggerTypeProxy(typeof(DictionaryKeyCollectionDebugView<,>))]
+        [DebuggerTypeProxy(typeof(DictionaryKeyCollectionDebugView<,>))]
         [DebuggerDisplay("Count = {Count}")]
         public sealed class KeyCollection : ICollection<TKey>, ICollection, IReadOnlyCollection<TKey>
         {
-            private readonly MyDictionary<TKey, TValue> _dictionary;
+            private readonly Dictionary<TKey, TValue> _dictionary;
 
-            public KeyCollection(MyDictionary<TKey, TValue> dictionary)
+            public KeyCollection(Dictionary<TKey, TValue> dictionary)
             {
                 if (dictionary == null)
                 {
@@ -1583,7 +1583,7 @@ namespace System.Collections.Generic
 
             public struct Enumerator : IEnumerator<TKey>, IEnumerator
             {
-                private readonly MyDictionary<TKey, TValue> _dictionary;
+                private readonly Dictionary<TKey, TValue> _dictionary;
                 private readonly int _version;
                 private readonly int _tolerantVersion;
                 private IBitMask _currentBitMask;
@@ -1601,7 +1601,7 @@ namespace System.Collections.Generic
                     }
                 }
 
-                internal unsafe Enumerator(MyDictionary<TKey, TValue> dictionary)
+                internal unsafe Enumerator(Dictionary<TKey, TValue> dictionary)
                 {
                     _dictionary = dictionary;
                     _version = dictionary._version;
@@ -1682,14 +1682,13 @@ namespace System.Collections.Generic
             }
         }
 
-
-        // [DebuggerTypeProxy(typeof(DictionaryValueCollectionDebugView<,>))]
+        [DebuggerTypeProxy(typeof(DictionaryValueCollectionDebugView<,>))]
         [DebuggerDisplay("Count = {Count}")]
         public sealed class ValueCollection : ICollection<TValue>, ICollection, IReadOnlyCollection<TValue>
         {
-            private readonly MyDictionary<TKey, TValue> _dictionary;
+            private readonly Dictionary<TKey, TValue> _dictionary;
 
-            public ValueCollection(MyDictionary<TKey, TValue> dictionary)
+            public ValueCollection(Dictionary<TKey, TValue> dictionary)
             {
                 if (dictionary == null)
                 {
@@ -1806,7 +1805,7 @@ namespace System.Collections.Generic
 
             public struct Enumerator : IEnumerator<TValue>, IEnumerator
             {
-                private readonly MyDictionary<TKey, TValue> _dictionary;
+                private readonly Dictionary<TKey, TValue> _dictionary;
                 private readonly int _version;
                 private readonly int _tolerantVersion;
                 private IBitMask _currentBitMask;
@@ -1824,7 +1823,7 @@ namespace System.Collections.Generic
                     }
                 }
 
-                internal unsafe Enumerator(MyDictionary<TKey, TValue> dictionary)
+                internal unsafe Enumerator(Dictionary<TKey, TValue> dictionary)
                 {
                     _dictionary = dictionary;
                     _version = dictionary._version;
