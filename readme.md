@@ -54,37 +54,37 @@ git clone --single-branch --branch implement-swisstable-as-hashmap https://githu
 ###### runtime
 
 # full build command
-./build clr+libs+libs.tests -rc release -lc release
+./build.cmd clr+libs+libs.tests -rc release -lc release
 
-# iterate command
+# iterate command for debug
 ./build.cmd clr.corelib+clr.nativecorelib+libs.pretest -rc Release
 
-##### performance
-$upstreamRuntimeRepoRoot = "D:\MyRepo\runtime"
-$swisstableRuntimeRepoRoot = "D:\MyRepo\runtimeSwisstable"
+# iterate command for perf-test
+./build.cmd clr.corelib+clr.nativecorelib+libs.pretest -rc Release -lc Release
 
-$performanceRoot = "D:\MyRepo\performance"
+# run test for collections
+cd src\libraries\System.Collections.Immutable\tests
+dotnet build /t:Test
+
+##### performance
+$reposRoot = "C:\Code"
+
+$upstreamRuntimeRepoRoot = $reposRoot + "\runtime"
+$swisstableRuntimeRepoRoot = $reposRoot + "\runtimeSwisstable"
+$performanceRoot = $reposRoot + "\performance"
+
 $microbenchmarksFullPath = $performanceRoot + "\src\benchmarks\micro"
 $ResultsComparerFullPath = $performanceRoot + "\src\tools\ResultsComparer"
 
-$perfFolderRoot = "D:\MyRepo\SwissTablePerf"
+$perfFolderRoot = $reposRoot + "\SwissTablePerf"
 $upstreamPerf = $perfFolderRoot + "\before"
 $swisstablePerf = $perfFolderRoot + "\after"
+$swisstablePerf1 = $perfFolderRoot + "\after1"
 
 $coreRunRelativePath = "\artifacts\bin\testhost\net7.0-windows-Release-x64\shared\Microsoft.NETCore.App\7.0.0\CoreRun.exe"
 $upstreamCoreRun = $upstreamRuntimeRepoRoot + $coreRunRelativePath
 $swisstableCoreRun = $swisstableRuntimeRepoRoot + $coreRunRelativePath
 $dictionaryFilter = "System.Collection*.Dictionary"
-
-
-function Analytics-Perf{
-    [CmdletBinding()]
-    param ()
-    pushd
-    cd $ResultsComparerFullPath
-    dotnet run --base $upstreamPerf --diff $swisstablePerf --threshold 2%
-    popd
-}
 
 function Generate-PerfAnalytics{
     [CmdletBinding()]
@@ -115,5 +115,28 @@ function Generate-PerfAnalyticsForNow {
     Generate-PerfAnalytics $swisstablePerf $swisstableCoreRun
 }
 
+function Generate-PerfAnalyticsForNow1 {
+    [CmdletBinding()]
+    param ()
+    Generate-PerfAnalytics $swisstablePerf1 $swisstableCoreRun
+}
+
+function Analytics-Perf{
+    [CmdletBinding()]
+    param ()
+    pushd
+    cd $ResultsComparerFullPath
+    dotnet run --base $upstreamPerf --diff $swisstablePerf --threshold 2%
+    popd
+}
+
+function Analytics-PerfIter{
+    [CmdletBinding()]
+    param ()
+    pushd
+    cd $ResultsComparerFullPath
+    dotnet run --base $swisstablePerf --diff $swisstablePerf1 --threshold 2%
+    popd
+}
 
 ```
