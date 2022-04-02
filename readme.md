@@ -1,3 +1,10 @@
+
+## This repo has been deprecated
+
+The implementation is on real dotnet/runtime now to test perf: https://github.com/ShuiRuTian/runtime/tree/swisstable
+
+### Resources
+
 write-safe-efficient-code: https://docs.microsoft.com/en-us/dotnet/csharp/write-safe-efficient-code
 Span source code: https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/System/Span.cs
 current HashTable of C#: https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/System/Collections/Generic/Dictionary.cs
@@ -39,3 +46,74 @@ dotnet run -c Release -p:StartupObject=Benchmarks.GenericInline
 
 ### clone the working dotnet/runtime
 git clone --single-branch --branch implement-swisstable-as-hashmap https://github.com/ShuiRuTian/runtime.git --depth=1
+
+###
+
+``` ps1
+
+###### runtime
+
+# full build command
+./build clr+libs+libs.tests -rc release -lc release
+
+# iterate command
+./build.cmd clr.corelib+clr.nativecorelib+libs.pretest -rc Release
+
+##### performance
+$upstreamRuntimeRepoRoot = "D:\MyRepo\runtime"
+$swisstableRuntimeRepoRoot = "D:\MyRepo\runtimeSwisstable"
+
+$performanceRoot = "D:\MyRepo\performance"
+$microbenchmarksFullPath = $performanceRoot + "\src\benchmarks\micro"
+$ResultsComparerFullPath = $performanceRoot + "\src\tools\ResultsComparer"
+
+$perfFolderRoot = "D:\MyRepo\SwissTablePerf"
+$upstreamPerf = $perfFolderRoot + "\before"
+$swisstablePerf = $perfFolderRoot + "\after"
+
+$coreRunRelativePath = "\artifacts\bin\testhost\net7.0-windows-Release-x64\shared\Microsoft.NETCore.App\7.0.0\CoreRun.exe"
+$upstreamCoreRun = $upstreamRuntimeRepoRoot + $coreRunRelativePath
+$swisstableCoreRun = $swisstableRuntimeRepoRoot + $coreRunRelativePath
+$dictionaryFilter = "System.Collection*.Dictionary"
+
+
+function Analytics-Perf{
+    [CmdletBinding()]
+    param ()
+    pushd
+    cd $ResultsComparerFullPath
+    dotnet run --base $upstreamPerf --diff $swisstablePerf --threshold 2%
+    popd
+}
+
+function Generate-PerfAnalytics{
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$DestinationPerfFolder,
+        [Parameter(Mandatory)]
+        [string]$CoreRunPath
+    )
+    pushd
+    cd $microbenchmarksFullPath
+    dotnet run -c Release -f net7.0 `
+        --artifacts $DestinationPerfFolder `
+        --coreRun $CoreRunPath `
+        --filter $dictionaryFilter
+    popd
+}
+
+function Generate-PerfAnalyticsForBefore {
+    [CmdletBinding()]
+    param ()
+    Generate-PerfAnalytics $upstreamPerf $upstreamCoreRun
+}
+
+function Generate-PerfAnalyticsForNow {
+    [CmdletBinding()]
+    param ()
+    Generate-PerfAnalytics $swisstablePerf $swisstableCoreRun
+}
+
+
+```

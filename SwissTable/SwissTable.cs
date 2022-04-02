@@ -80,43 +80,43 @@ namespace System.Collections.Generic
             {
                 var probe_seq = new ProbeSeq(hash, _bucket_mask);
                 IGroup group;
-                while (true)
+                fixed (byte* ptr = &_controls[0])
                 {
-                    // TODO: maybe we should lock even fix the whole loop.
-                    // I am not sure which would be faster.
-                    fixed (byte* ptr = &_controls[probe_seq.pos])
+                    while (true)
                     {
-                        group = _group.load(ptr);
-                    }
-                    var bit = group.match_empty_or_deleted().lowest_set_bit();
-                    if (bit.HasValue)
-                    {
-                        var result = (probe_seq.pos + bit.Value) & _bucket_mask;
-
-                        // In tables smaller than the group width, trailing control
-                        // bytes outside the range of the table are filled with
-                        // EMPTY entries. These will unfortunately trigger a
-                        // match, but once masked may point to a full bucket that
-                        // is already occupied. We detect this situation here and
-                        // perform a second scan starting at the begining of the
-                        // table. This second scan is guaranteed to find an empty
-                        // slot (due to the load factor) before hitting the trailing
-                        // control bytes (containing EMPTY).
-                        if (is_full(_controls[result]))
+                        // TODO: maybe we should lock even fix the whole loop.
+                        // I am not sure which would be faster.
+                        group = _group.load(ptr + probe_seq.pos);
+                        var bit = group.match_empty_or_deleted().lowest_set_bit();
+                        if (bit.HasValue)
                         {
-                            Debug.Assert(_bucket_mask < _group.WIDTH);
-                            Debug.Assert(probe_seq.pos != 0);
-                            // TODO: Is this safe?
-                            fixed (byte* ptr2 = &_controls[0])
+                            var result = (probe_seq.pos + bit.Value) & _bucket_mask;
+
+                            // In tables smaller than the group width, trailing control
+                            // bytes outside the range of the table are filled with
+                            // EMPTY entries. These will unfortunately trigger a
+                            // match, but once masked may point to a full bucket that
+                            // is already occupied. We detect this situation here and
+                            // perform a second scan starting at the begining of the
+                            // table. This second scan is guaranteed to find an empty
+                            // slot (due to the load factor) before hitting the trailing
+                            // control bytes (containing EMPTY).
+                            if (is_full(_controls[result]))
                             {
-                                return _group.load(ptr2)
-                                    .match_empty_or_deleted()
-                                    .lowest_set_bit_nonzero();
+                                Debug.Assert(_bucket_mask < _group.WIDTH);
+                                Debug.Assert(probe_seq.pos != 0);
+                                // TODO: Is this safe?
+                                fixed (byte* ptr2 = &_controls[0])
+                                {
+                                    return _group.load(ptr2)
+                                        .match_empty_or_deleted()
+                                        .lowest_set_bit_nonzero();
+                                }
                             }
+                            return result;
                         }
-                        return result;
+                        probe_seq.move_next();
                     }
-                    probe_seq.move_next(_bucket_mask);
                 }
             }
 
@@ -794,7 +794,7 @@ namespace System.Collections.Generic
         /// These methods are relatively niche and only used in specific scenarios, so adding them in a separate type avoids
         /// the additional overhead on each <see cref="Dictionary{TKey, TValue}"/> instantiation, especially in AOT scenarios.
         /// </summary>
-        public static class CollectionsMarshalHelper
+        internal static class CollectionsMarshalHelper
         {
             /// <inheritdoc cref="Runtime.InteropServices.CollectionsMarshal.GetValueRefOrAddDefault{TKey, TValue}(Dictionary{TKey, TValue}, TKey, out bool)"/>
             public static ref TValue? GetValueRefOrAddDefault(Dictionary<TKey, TValue> dictionary, TKey key, out bool exists)
@@ -1079,31 +1079,31 @@ namespace System.Collections.Generic
             var probe_seq = new ProbeSeq(hash, rawTable._bucket_mask);
             ref Entry entry = ref Unsafe.NullRef<Entry>();
             IGroup group;
-            while (true)
+            fixed (byte* ptr = &rawTable._controls[0])
             {
-                fixed (byte* ptr = &rawTable._controls[probe_seq.pos])
+                while (true)
                 {
-                    group = _group.load(ptr);
-                }
-                var bitmask = group.match_byte(h2_hash);
-                // TODO: Iterator and performance, if not influence, iterator would be clearer.
-                while (bitmask.any_bit_set())
-                {
-                    Debug.Assert(rawTable._entries != null);
-                    var bit = bitmask.lowest_set_bit()!.Value;
-                    bitmask = bitmask.remove_lowest_bit();
-                    var index = (probe_seq.pos + bit) & rawTable._bucket_mask;
-                    entry = ref rawTable._entries[index];
-                    if (IsKeyEqual(key, entry.Key))
+                    group = _group.load(ptr + probe_seq.pos);
+                    var bitmask = group.match_byte(h2_hash);
+                    // TODO: Iterator and performance, if not influence, iterator would be clearer.
+                    while (bitmask.any_bit_set())
                     {
-                        return ref entry;
+                        Debug.Assert(rawTable._entries != null);
+                        var bit = bitmask.lowest_set_bit()!.Value;
+                        bitmask = bitmask.remove_lowest_bit();
+                        var index = (probe_seq.pos + bit) & rawTable._bucket_mask;
+                        entry = ref rawTable._entries[index];
+                        if (IsKeyEqual(key, entry.Key))
+                        {
+                            return ref entry;
+                        }
                     }
+                    if (group.match_empty().any_bit_set())
+                    {
+                        return ref Unsafe.NullRef<Entry>();
+                    }
+                    probe_seq.move_next();
                 }
-                if (group.match_empty().any_bit_set())
-                {
-                    return ref Unsafe.NullRef<Entry>();
-                }
-                probe_seq.move_next(rawTable._bucket_mask);
             }
         }
 
@@ -1121,31 +1121,31 @@ namespace System.Collections.Generic
             var probe_seq = new ProbeSeq(hash, rawTable._bucket_mask);
             ref Entry entry = ref Unsafe.NullRef<Entry>();
             IGroup group;
-            while (true)
+            fixed (byte* ptr = &rawTable._controls[0])
             {
-                fixed (byte* ptr = &rawTable._controls[probe_seq.pos])
+                while (true)
                 {
-                    group = _group.load(ptr);
-                }
-                var bitmask = group.match_byte(h2_hash);
-                // TODO: Iterator and performance, if not influence, iterator would be clearer.
-                while (bitmask.any_bit_set())
-                {
-                    // there must be set bit
-                    var bit = bitmask.lowest_set_bit()!.Value;
-                    bitmask = bitmask.remove_lowest_bit();
-                    var index = (probe_seq.pos + bit) & rawTable._bucket_mask;
-                    entry = ref rawTable._entries[index];
-                    if (IsKeyEqual(key, entry.Key))
+                    group = _group.load(ptr + probe_seq.pos);
+                    var bitmask = group.match_byte(h2_hash);
+                    // TODO: Iterator and performance, if not influence, iterator would be clearer.
+                    while (bitmask.any_bit_set())
                     {
-                        return index;
+                        // there must be set bit
+                        var bit = bitmask.lowest_set_bit()!.Value;
+                        bitmask = bitmask.remove_lowest_bit();
+                        var index = (probe_seq.pos + bit) & rawTable._bucket_mask;
+                        entry = ref rawTable._entries[index];
+                        if (IsKeyEqual(key, entry.Key))
+                        {
+                            return index;
+                        }
                     }
+                    if (group.match_empty().any_bit_set())
+                    {
+                        return null;
+                    }
+                    probe_seq.move_next();
                 }
-                if (group.match_empty().any_bit_set())
-                {
-                    return null;
-                }
-                probe_seq.move_next(rawTable._bucket_mask);
             }
         }
 
@@ -1286,19 +1286,23 @@ namespace System.Collections.Generic
         internal struct ProbeSeq
         {
             internal int pos;
-            internal int stride;
+            private int _stride;
+            private readonly int _bucket_mask;
+
             internal ProbeSeq(int hash, int bucket_mask)
             {
+                this._bucket_mask = bucket_mask;
                 this.pos = h1(hash) & bucket_mask;
-                this.stride = 0;
+                this._stride = 0;
             }
-            internal void move_next(int bucket_mask)
+
+            internal void move_next()
             {
                 // We should have found an empty bucket by now and ended the probe.
-                Debug.Assert(this.stride <= bucket_mask, "Went past end of probe sequence");
-                unchecked { this.stride += _group.WIDTH; }
-                this.pos += this.stride;
-                this.pos &= bucket_mask;
+                Debug.Assert(this._stride <= _bucket_mask, "Went past end of probe sequence");
+                unchecked { this._stride += _group.WIDTH; }
+                this.pos += this._stride;
+                this.pos &= _bucket_mask;
             }
         }
 
