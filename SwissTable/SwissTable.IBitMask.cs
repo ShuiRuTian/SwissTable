@@ -16,26 +16,30 @@ namespace System.Collections.Generic
     /// performed on counts/indices to normalize this difference. `BITMASK_MASK` is
     /// similarly a mask of all the actually-used bits.
     /// </summary>
-    internal interface IBitMask
+    // The generic is for performance.
+    // All implementations should be struct for performance, however, if the returned type is interface, there will be boxing and unboxing.
+    // And inline will not work too.
+    // So we need to pass a implementation.
+    internal interface IBitMask<BitMaskImpl> where BitMaskImpl : struct, IBitMask<BitMaskImpl>
     {
         /// <summary>
         /// Returns a new `BitMask` with all bits inverted.
         /// </summary>
         /// <returns></returns>
-        IBitMask invert();
+        BitMaskImpl invert();
 
         /// <summary>
         /// Returns a new `BitMask` with the lowest bit removed.
         /// </summary>
         /// <returns></returns>
-        IBitMask remove_lowest_bit();
+        BitMaskImpl remove_lowest_bit();
 
         /// <summary>
         /// Returns a new `BitMask` with the internal data logic and.
         /// </summary>
         /// <param name="bitMask"> must be the same type with caller</param>
         /// <returns></returns>
-        IBitMask And(IBitMask bitMask);
+        BitMaskImpl And(BitMaskImpl bitMask);
 
         /// <summary>
         /// Returns whether the `BitMask` has at least one set bit.

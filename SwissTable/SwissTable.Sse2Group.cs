@@ -9,7 +9,7 @@ using System.Runtime.Intrinsics.X86;
 
 namespace System.Collections.Generic
 {
-    internal struct Sse2BitMask : IBitMask
+    internal struct Sse2BitMask : IBitMask<Sse2BitMask>
     {
         private const ushort BITMASK_MASK = 0xffff;
 
@@ -23,7 +23,7 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IBitMask invert()
+        public Sse2BitMask invert()
         {
             return new Sse2BitMask((ushort)(this._data ^ BITMASK_MASK));
         }
@@ -64,7 +64,7 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IBitMask remove_lowest_bit()
+        public Sse2BitMask remove_lowest_bit()
         {
             return new Sse2BitMask((ushort)(this._data & (this._data - 1)));
         }
@@ -76,15 +76,23 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IBitMask And(IBitMask bitMask)
+        public Sse2BitMask And(Sse2BitMask bitMask)
         {
-            Debug.Assert(bitMask is Sse2BitMask);
             return new Sse2BitMask((ushort)(this._data & ((Sse2BitMask)bitMask)._data));
         }
     }
 
-    internal struct Sse2Group : IGroup
+    // TODO: suppress default initialization.
+    internal struct Sse2Group : IGroup<Sse2BitMask, Sse2Group>
     {
+        [Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2207:Initialize value type static fields inline", Justification = "The doc says not to suppress this, but how to fix?")]
+        static Sse2Group()
+        {
+            var res = new byte[128 / 8];
+            Array.Fill(res, SwissTableHelper.EMPTY);
+            _static_empty = res;
+        }
+
         // 128 bits(_data length) / 8 (byte bits) = 16 bytes
         public readonly int WIDTH => 128 / 8;
 
@@ -94,22 +102,18 @@ namespace System.Collections.Generic
         {
             _data = data;
         }
+        private static readonly byte[] _static_empty;
 
-        public byte[] static_empty()
-        {
-            var res = new byte[WIDTH];
-            Array.Fill(res, SwissTableHelper.EMPTY);
-            return res;
-        }
+        public readonly byte[] static_empty => _static_empty;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe IGroup load(byte* ptr)
+        public unsafe Sse2Group load(byte* ptr)
         {
             return new Sse2Group(Sse2.LoadVector128(ptr));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe IGroup load_aligned(byte* ptr)
+        public unsafe Sse2Group load_aligned(byte* ptr)
         {
             // `uint` casting is OK, WIDTH is 16, so checking lowest 4 bits for address align
             Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
@@ -125,7 +129,7 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IBitMask match_byte(byte b)
+        public Sse2BitMask match_byte(byte b)
         {
             // TODO: Check how compiler create this, which command it uses. This might incluence performance dramatically.
             var compareValue = Vector128.Create(b);
@@ -134,26 +138,26 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IBitMask match_empty()
+        public Sse2BitMask match_empty()
         {
             return this.match_byte(SwissTableHelper.EMPTY);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IBitMask match_empty_or_deleted()
+        public Sse2BitMask match_empty_or_deleted()
         {
             // A byte is EMPTY or DELETED iff the high bit is set
             return new Sse2BitMask((ushort)Sse2.MoveMask(this._data));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IBitMask match_full()
+        public Sse2BitMask match_full()
         {
             return this.match_empty_or_deleted().invert();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IGroup convert_special_to_empty_and_full_to_deleted()
+        public Sse2Group convert_special_to_empty_and_full_to_deleted()
         {
             // Map high_bit = 1 (EMPTY or DELETED) to 1111_1111
             // and high_bit = 0 (FULL) to 1000_0000

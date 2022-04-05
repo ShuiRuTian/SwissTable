@@ -3,6 +3,12 @@
 
 The implementation is on real dotnet/runtime now to test perf: https://github.com/ShuiRuTian/runtime/tree/swisstable
 
+## Why I need this repo?
+cross-environemnt is hard and tricky.
+We need a CLR to run C# program on. And there is an updated Dictionary implementation, which we want to use in the test.
+The test is C# code, no suprising. But the program that starts the test is also C# which use the updated Dictionary.
+Dictionary is widely used, so the program might just crashes as long as there is some error :/
+
 ### Resources
 
 write-safe-efficient-code: https://docs.microsoft.com/en-us/dotnet/csharp/write-safe-efficient-code
@@ -63,15 +69,17 @@ git clone --single-branch --branch implement-swisstable-as-hashmap https://githu
 ./build.cmd clr.corelib+clr.nativecorelib+libs.pretest -rc Release -lc Release
 
 # run test for collections
-cd src\libraries\System.Collections.Immutable\tests
+cd src\libraries\System.Collections\tests
 dotnet build /t:Test
 
 ##### performance
-$reposRoot = "C:\Code"
+$reposRoot = "D:\MyRepo"
 
 $upstreamRuntimeRepoRoot = $reposRoot + "\runtime"
 $swisstableRuntimeRepoRoot = $reposRoot + "\runtimeSwisstable"
 $performanceRoot = $reposRoot + "\performance"
+
+$swisstableRuntimeCollectionTest = $swisstableRuntimeRepoRoot + "\src\libraries\System.Collections\tests"
 
 $microbenchmarksFullPath = $performanceRoot + "\src\benchmarks\micro"
 $ResultsComparerFullPath = $performanceRoot + "\src\tools\ResultsComparer"
@@ -84,7 +92,32 @@ $swisstablePerf1 = $perfFolderRoot + "\after1"
 $coreRunRelativePath = "\artifacts\bin\testhost\net7.0-windows-Release-x64\shared\Microsoft.NETCore.App\7.0.0\CoreRun.exe"
 $upstreamCoreRun = $upstreamRuntimeRepoRoot + $coreRunRelativePath
 $swisstableCoreRun = $swisstableRuntimeRepoRoot + $coreRunRelativePath
+
 $dictionaryFilter = "System.Collection*.Dictionary"
+
+function Build-IterSwisstableDebug{
+    [CmdletBinding()]
+    param ()
+    pushd
+    cd $swisstableRuntimeRepoRoot
+    ./build.cmd clr.corelib+clr.nativecorelib+libs.pretest -rc Release
+    popd
+}
+
+function Build-IterSwisstableRelease{
+    [CmdletBinding()]
+    param ()
+    pushd
+    cd $swisstableRuntimeRepoRoot
+    ./build.cmd clr.corelib+clr.nativecorelib+libs.pretest -rc Release  -lc Release
+    popd
+}
+
+function Test-Collections{
+    [CmdletBinding()]
+    param ()
+    dotnet build /t:Test
+}
 
 function Generate-PerfAnalytics{
     [CmdletBinding()]
@@ -121,7 +154,7 @@ function Generate-PerfAnalyticsForNow1 {
     Generate-PerfAnalytics $swisstablePerf1 $swisstableCoreRun
 }
 
-function Analytics-Perf{
+function Analytics-PerfBaseUpstream{
     [CmdletBinding()]
     param ()
     pushd
@@ -139,4 +172,22 @@ function Analytics-PerfIter{
     popd
 }
 
+function Analytics-PerfIterBaseUpstream{
+    [CmdletBinding()]
+    param ()
+    pushd
+    cd $ResultsComparerFullPath
+    dotnet run --base $upstreamPerf --diff $swisstablePerf1 --threshold 2%
+    popd
+}
+
+function Generate-SwisstablePerfDetailedAnalyticsForCase{
+    # generate assembly and etw
+    [CmdletBinding()]
+    param ()
+    pushd
+    cd $microbenchmarksFullPath
+    dotnet run -c Release -f net7.0 --profiler ETW --filter System.Collections.TryAddDefaultSize*.Dictionary --coreRun $swisstableCoreRun -d
+    popd
+}
 ```

@@ -4,6 +4,9 @@ using BenchmarkDotNet.Running;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Numerics;
+using System.Diagnostics;
 
 namespace Benchmark
 {
@@ -15,21 +18,15 @@ namespace Benchmark
         [GlobalSetup]
         public void InitializeContainsValue()
         {
-            data = new byte[100];
+            data = new byte[128 + 16];
+            Array.Fill(data, SwissTableHelper.EMPTY);
         }
 
         [Benchmark]
-        public unsafe IBitMask AggressiveLineForRuntime()
+        public unsafe int GenericInline()
         {
-            fixed (byte* ptr = &data[0])
-            {
-                IBitMask bitMask = new Sse2Group().load(ptr)
-                    .match_full()
-                    .remove_lowest_bit()
-                    .remove_lowest_bit()
-                    .remove_lowest_bit();
-                return bitMask;
-            }
+            var tmp = SwissTableHelper.DispatchFindInsertSlot(1234, data);
+            return tmp;
         }
     }
 }

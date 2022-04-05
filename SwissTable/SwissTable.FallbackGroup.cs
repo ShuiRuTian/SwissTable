@@ -7,13 +7,13 @@ using System.Runtime.CompilerServices;
 
 namespace System.Collections.Generic
 {
-    internal struct FallbackBitMask : IBitMask
+    internal struct FallbackBitMask : IBitMask<FallbackBitMask>
     {
         // Why use nuint/nint?
         // For 64 bit platform, we could compare 8 buckets at one time,
         // For 32 bit platform, we could compare 4 buckets at one time.
         // And it might be faster to access data for it is aligned, but not sure.
-        private readonly nuint  _data;
+        private readonly nuint _data;
 
         private static nuint BITMASK_MASK => unchecked((nuint)0x8080_8080_8080_8080);
 
@@ -26,7 +26,7 @@ namespace System.Collections.Generic
 
         /// Returns a new `BitMask` with all bits inverted.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IBitMask invert()
+        public FallbackBitMask invert()
         {
             return new FallbackBitMask(this._data ^ BITMASK_MASK);
         }
@@ -71,7 +71,7 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IBitMask remove_lowest_bit()
+        public FallbackBitMask remove_lowest_bit()
         {
             return new FallbackBitMask(this._data & (this._data - 1));
         }
@@ -83,17 +83,27 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IBitMask And(IBitMask bitMask)
+        public FallbackBitMask And(FallbackBitMask bitMask)
         {
-            Debug.Assert(bitMask is Sse2BitMask);
             return new FallbackBitMask(this._data & ((FallbackBitMask)bitMask)._data);
-
         }
     }
 
-    internal struct FallbackGroup : IGroup
+    internal struct FallbackGroup : IGroup<FallbackBitMask, FallbackGroup>
     {
+        [Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2207:Initialize value type static fields inline", Justification = "The doc says not to suppress this, but how to fix?")]
+        static unsafe FallbackGroup()
+        {
+            var res = new byte[sizeof(nuint)];
+            Array.Fill(res, SwissTableHelper.EMPTY);
+            _static_empty = res;
+        }
+
         public unsafe readonly int WIDTH => sizeof(nuint);
+
+        private static readonly byte[] _static_empty;
+
+        public readonly byte[] static_empty => _static_empty;
 
         private nuint repeat(byte b)
         {
@@ -113,21 +123,14 @@ namespace System.Collections.Generic
             _data = data;
         }
 
-        public byte[] static_empty()
-        {
-            var res = new byte[WIDTH];
-            Array.Fill(res, SwissTableHelper.EMPTY);
-            return res;
-        }
-
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe IGroup load(byte* ptr)
+        public unsafe FallbackGroup load(byte* ptr)
         {
             return new FallbackGroup(Unsafe.ReadUnaligned<nuint>(ptr));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe IGroup load_aligned(byte* ptr)
+        public unsafe FallbackGroup load_aligned(byte* ptr)
         {
             // uint casting is OK, for WIDTH only use low 16 bits now.
             Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
@@ -135,47 +138,7 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe void store_aligned(byte* ptr)
-        {
-            // uint casting is OK, for WIDTH only use low 16 bits now.
-            Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
-            Unsafe.Write(ptr, this._data);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IBitMask match_byte(byte b)
-        {
-            // This algorithm is derived from
-            // https://graphics.stanford.edu/~seander/bithacks.html##ValueInWord
-            var cmp = this._data ^ this.repeat(b);
-            var res = unchecked((cmp - (nuint)0x0101_0101_0101_0101) & ~cmp & (nuint)0x8080_8080_8080_8080);
-            return new FallbackBitMask(res);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IBitMask match_empty()
-        {
-            // If the high bit is set, then the byte must be either:
-            // 1111_1111 (EMPTY) or 1000_0000 (DELETED).
-            // So we can just check if the top two bits are 1 by ANDing them.
-            return new FallbackBitMask(this._data & this._data << 1 & unchecked((nuint)0x8080_8080_8080_8080));
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IBitMask match_empty_or_deleted()
-        {
-            // A byte is EMPTY or DELETED iff the high bit is set
-            return new FallbackBitMask(this._data & unchecked((nuint)0x8080_8080_8080_8080));
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IBitMask match_full()
-        {
-            return this.match_empty_or_deleted().invert();
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IGroup convert_special_to_empty_and_full_to_deleted()
+        public FallbackGroup convert_special_to_empty_and_full_to_deleted()
         {
             // Map high_bit = 1 (EMPTY or DELETED) to 1111_1111
             // and high_bit = 0 (FULL) to 1000_0000
@@ -188,6 +151,46 @@ namespace System.Collections.Generic
             var q = (full >> 7);
             var w = ~full + q;
             return new FallbackGroup(w);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public unsafe void store_aligned(byte* ptr)
+        {
+            // uint casting is OK, for WIDTH only use low 16 bits now.
+            Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
+            Unsafe.Write(ptr, this._data);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public FallbackBitMask match_byte(byte b)
+        {
+            // This algorithm is derived from
+            // https://graphics.stanford.edu/~seander/bithacks.html##ValueInWord
+            var cmp = this._data ^ this.repeat(b);
+            var res = unchecked((cmp - (nuint)0x0101_0101_0101_0101) & ~cmp & (nuint)0x8080_8080_8080_8080);
+            return new FallbackBitMask(res);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public FallbackBitMask match_empty()
+        {
+            // If the high bit is set, then the byte must be either:
+            // 1111_1111 (EMPTY) or 1000_0000 (DELETED).
+            // So we can just check if the top two bits are 1 by ANDing them.
+            return new FallbackBitMask(this._data & this._data << 1 & unchecked((nuint)0x8080_8080_8080_8080));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public FallbackBitMask match_empty_or_deleted()
+        {
+            // A byte is EMPTY or DELETED iff the high bit is set
+            return new FallbackBitMask(this._data & unchecked((nuint)0x8080_8080_8080_8080));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public FallbackBitMask match_full()
+        {
+            return this.match_empty_or_deleted().invert();
         }
     }
 }
