@@ -11,7 +11,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DebugRuntimeDummy", "DebugR
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Benchmark", "Benchmark\Benchmark.csproj", "{7D3A3934-150E-4FF7-87AE-1D2858E0DE8D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Repro", "Repro\Repro.csproj", "{5687297B-B99E-4A6C-8698-39EEF64DB07F}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Repro", "Repro\Repro.csproj", "{5687297B-B99E-4A6C-8698-39EEF64DB07F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

@@ -187,7 +187,7 @@ function Generate-SwisstablePerfDetailedAnalyticsForCase{
     param ()
     pushd
     cd $microbenchmarksFullPath
-    dotnet run -c Release -f net7.0 --profiler ETW --filter System.Collections.TryAddDefaultSize*.Dictionary --coreRun $swisstableCoreRun -d
+    dotnet run -c Release -f net7.0 --filter System.Collections.TryAddDefaultSize*.Dictionary --coreRun $swisstableCoreRun --profiler ETW 
     popd
 }
 ```

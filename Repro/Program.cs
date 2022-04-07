@@ -6,7 +6,7 @@ namespace Repro
 {
     class Program
     {
-        const int Count = 512;
+        const int Count = 2000;
         static void Main()
         {
             int[] _uniqueValues = ValuesGenerator.ArrayOfUniqueValues<int>(Count);
@@ -20,7 +20,7 @@ namespace Repro
         private static bool ActualJob(int[] _uniqueValues)
         {
             bool result = false;
-            var collection = new Dictionary<int, int>();
+            var collection = new MyDictionary<int, int>();
 
             for (int i = 0; i < 500000; i++)
             {

@@ -80,7 +80,7 @@ namespace System.Collections.Generic
             // not check replace, caller should make sure
             internal int find_insert_slot(int hash)
             {
-                return DispatchFindInsertSlot(hash, _controls);
+                return DispatchFindInsertSlot(hash, _controls, _bucket_mask);
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -137,6 +137,7 @@ namespace System.Collections.Generic
             // hash buckets become unbalanced.
             if (typeof(TKey) == typeof(string))
             {
+
             }
         }
 
@@ -180,7 +181,8 @@ namespace System.Collections.Generic
         {
             get
             {
-                    return _comparer ?? EqualityComparer<TKey>.Default;
+
+                return _comparer ?? EqualityComparer<TKey>.Default;
             }
         }
 
@@ -285,9 +287,9 @@ namespace System.Collections.Generic
             if (this.rawTable._entries != null)
             {
                 var index = this.FindBucketIndex(key);
-                if (index != null)
+                if (index >= 0)
                 {
-                    this.erase(index.Value);
+                    this.erase(index);
                     _tolerantVersion++;
                     return true;
                 }
@@ -305,9 +307,9 @@ namespace System.Collections.Generic
             if (this.rawTable._entries != null)
             {
                 var index = this.FindBucketIndex(key);
-                if (index != null)
+                if (index >= 0)
                 {
-                    value = this.erase(index.Value);
+                    value = this.erase(index);
                     _tolerantVersion++;
                     return true;
                 }
@@ -799,7 +801,7 @@ namespace System.Collections.Generic
             }
         }
 
-        public struct Entry
+        internal struct Entry
         {
             internal TKey Key;
             internal TValue Value;
@@ -809,6 +811,7 @@ namespace System.Collections.Generic
         // Note that the _entries might still not allocated
         // this means we do not want to use any existing data, including resize or use dictionary initialize
         // `realisticCapacity` is any positive number
+        [SkipLocalsInit]
         private void InitializeInnerTable(int realisticCapacity)
         {
             if (realisticCapacity < 0)
@@ -836,6 +839,7 @@ namespace System.Collections.Generic
             GrowWorker(idealCapacity);
         }
 
+        [SkipLocalsInit]
         private void GrowWorker(int idealEntryLength)
         {
             Debug.Assert(idealEntryLength >= rawTable._count);
@@ -1020,19 +1024,17 @@ namespace System.Collections.Generic
             {
                 ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
             }
-            // TODO: inline this for better performance
-            var index = FindBucketIndex(key);
-            if (!index.HasValue)
-            {
-                return ref Unsafe.NullRef<Entry>();
-            }
-            Debug.Assert(this.rawTable._entries != null);
-            return ref this.rawTable._entries[index.Value];
+            return ref DispatchFindBucketOfDictionary(this, key);
         }
 
         // TODO: use negative as not find
-        private unsafe int? FindBucketIndex(TKey key)
+        private unsafe int FindBucketIndex(TKey key)
         {
+            if (key == null)
+            {
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+            }
+
             return DispatchFindBucketIndexOfDictionary(this, key);
         }
 
@@ -1041,7 +1043,7 @@ namespace System.Collections.Generic
             // Attention, we could not just only set mark to `Deleted` to assume it is deleted, the reference is still here, and GC would not collect it.
             Debug.Assert(is_full(rawTable._controls[index]));
             Debug.Assert(rawTable._entries != null, "entries should be non-null");
-            var isEraseSafeToSetEmptyControlFlag = DispatchIsEraseSafeToSetEmptyControlFlag(rawTable._controls, index);
+            var isEraseSafeToSetEmptyControlFlag = DispatchIsEraseSafeToSetEmptyControlFlag(rawTable._bucket_mask, rawTable._controls, index);
             TValue res;
             byte ctrl;
             if (isEraseSafeToSetEmptyControlFlag)

@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Diagnostics;
@@ -9,23 +9,22 @@ using System.Runtime.Intrinsics.X86;
 
 namespace System.Collections.Generic
 {
-    internal struct Sse2BitMask : IBitMask<Sse2BitMask>
+    internal struct Avx2BitMask : IBitMask<Avx2BitMask>
     {
-        private const ushort BITMASK_MASK = 0xffff;
+        private const uint BITMASK_MASK = 0xffff_ffff;
 
-        // 128 / 8 = 16, so choose ushort
-        // Or maybe we could use `int` with only lowset 16 bits and some trick?
-        internal readonly ushort _data;
+        // 256 / 8 = 32, so choose uint
+        internal readonly uint _data;
 
-        internal Sse2BitMask(ushort data)
+        internal Avx2BitMask(uint data)
         {
             _data = data;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Sse2BitMask invert()
+        public Avx2BitMask invert()
         {
-            return new Sse2BitMask((ushort)(this._data ^ BITMASK_MASK));
+            return new Avx2BitMask((this._data ^ BITMASK_MASK));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -37,11 +36,7 @@ namespace System.Collections.Generic
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int leading_zeros()
         {
-            // maigc number `16`
-            // type of `this._data` is `short`
-            // however, it will be tranfrom to `uint` implicitly
-            // Delete the additional length
-            return BitOperations.LeadingZeroCount(this._data) - 16;
+            return BitOperations.LeadingZeroCount(this._data);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -64,9 +59,9 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Sse2BitMask remove_lowest_bit()
+        public Avx2BitMask remove_lowest_bit()
         {
-            return new Sse2BitMask((ushort)(this._data & (this._data - 1)));
+            return new Avx2BitMask(this._data & (this._data - 1));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -76,19 +71,19 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Sse2BitMask And(Sse2BitMask bitMask)
+        public Avx2BitMask And(Avx2BitMask bitMask)
         {
-            return new Sse2BitMask((ushort)(this._data & bitMask._data));
+            return new Avx2BitMask((this._data & bitMask._data));
         }
     }
 
     // TODO: suppress default initialization.
-    internal struct Sse2Group : IGroup<Sse2BitMask, Sse2Group>
+    internal struct Avx2Group : IGroup<Avx2BitMask, Avx2Group>
     {
         [Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2207:Initialize value type static fields inline", Justification = "The doc says not to suppress this, but how to fix?")]
-        static Sse2Group()
+        static Avx2Group()
         {
-            WIDTH = 128 / 8;
+            WIDTH = 256 / 8;
             var res = new byte[WIDTH];
             Array.Fill(res, SwissTableHelper.EMPTY);
             static_empty = res;
@@ -97,9 +92,9 @@ namespace System.Collections.Generic
         // 128 bits(_data length) / 8 (byte bits) = 16 bytes
         public static readonly int WIDTH;
 
-        private readonly Vector128<byte> _data;
+        private readonly Vector256<byte> _data;
 
-        internal Sse2Group(Vector128<byte> data)
+        internal Avx2Group(Vector256<byte> data)
         {
             _data = data;
         }
@@ -107,57 +102,57 @@ namespace System.Collections.Generic
         public static readonly byte[] static_empty;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static unsafe Sse2Group load(byte* ptr)
+        public static unsafe Avx2Group load(byte* ptr)
         {
-            return new Sse2Group(Sse2.LoadVector128(ptr));
+            return new Avx2Group(Avx2.LoadVector256(ptr));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static unsafe Sse2Group load_aligned(byte* ptr)
+        public static unsafe Avx2Group load_aligned(byte* ptr)
         {
-            // `uint` casting is OK, WIDTH is 16, so checking lowest 4 bits for address align
+            // `uint` casting is OK, WIDTH is 32, so checking lowest 5 bits for address align
             Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
-            return new Sse2Group(Sse2.LoadAlignedVector128(ptr));
+            return new Avx2Group(Avx2.LoadAlignedVector256(ptr));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public unsafe void store_aligned(byte* ptr)
         {
-            // `uint` casting is OK, WIDTH is 16, so checking lowest 4 bits for address align
+            // `uint` casting is OK, WIDTH is 32, so checking lowest 5 bits for address align
             Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
-            Sse2.StoreAligned(ptr, this._data);
+            Avx2.StoreAligned(ptr, this._data);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Sse2BitMask match_byte(byte b)
+        public Avx2BitMask match_byte(byte b)
         {
             // TODO: Check how compiler create this, which command it uses. This might incluence performance dramatically.
-            var compareValue = Vector128.Create(b);
-            var cmp = Sse2.CompareEqual(this._data, compareValue);
-            return new Sse2BitMask((ushort)Sse2.MoveMask(cmp));
+            var compareValue = Vector256.Create(b);
+            var cmp = Avx2.CompareEqual(this._data, compareValue);
+            return new Avx2BitMask((uint)Avx2.MoveMask(cmp));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Sse2BitMask match_empty()
+        public Avx2BitMask match_empty()
         {
             return this.match_byte(SwissTableHelper.EMPTY);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Sse2BitMask match_empty_or_deleted()
+        public Avx2BitMask match_empty_or_deleted()
         {
             // A byte is EMPTY or DELETED iff the high bit is set
-            return new Sse2BitMask((ushort)Sse2.MoveMask(this._data));
+            return new Avx2BitMask((uint)Avx2.MoveMask(this._data));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Sse2BitMask match_full()
+        public Avx2BitMask match_full()
         {
             return this.match_empty_or_deleted().invert();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Sse2Group convert_special_to_empty_and_full_to_deleted()
+        public Avx2Group convert_special_to_empty_and_full_to_deleted()
         {
             // Map high_bit = 1 (EMPTY or DELETED) to 1111_1111
             // and high_bit = 0 (FULL) to 1000_0000
@@ -167,11 +162,11 @@ namespace System.Collections.Generic
             //   1111_1111 | 1000_0000 = 1111_1111
             //   0000_0000 | 1000_0000 = 1000_0000
             // byte: 0x80_u8 as i8
-            var zero = Vector128<sbyte>.Zero;
+            var zero = Vector256<sbyte>.Zero;
             zero.As<sbyte, byte>();
             // TODO: check whether asXXXX could be removed.
-            var special = Sse2.CompareGreaterThan(zero, this._data.AsSByte()).AsByte();
-            return new Sse2Group(Sse2.Or(special, Vector128.Create((byte)0x80)));
+            var special = Avx2.CompareGreaterThan(zero, this._data.AsSByte()).AsByte();
+            return new Avx2Group(Avx2.Or(special, Vector256.Create((byte)0x80)));
         }
     }
 }

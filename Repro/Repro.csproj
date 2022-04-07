@@ -10,4 +10,8 @@
 		<TieredCompilation>false</TieredCompilation>
 	</PropertyGroup>
 
+	<ItemGroup>
+	  <ProjectReference Include="..\SwissTable\SwissTable.csproj" />
+	</ItemGroup>
+
 </Project>

@@ -9,30 +9,30 @@ namespace System.Collections.Generic
         where BitMaskImpl : struct, IBitMask<BitMaskImpl>
         where GroupImpl : struct, IGroup<BitMaskImpl, GroupImpl>
     {
-        /// <summary>
-        /// Returns a full group of empty bytes, suitable for use as the initial
-        /// value for an empty hash table.
-        /// </summary>
-        /// <returns></returns>
-        byte[] static_empty { get; }
+        ///// <summary>
+        ///// Returns a full group of empty bytes, suitable for use as the initial
+        ///// value for an empty hash table.
+        ///// </summary>
+        ///// <returns></returns>
+        ////byte[] static_empty { get; }
 
-        /// <summary>
-        /// The bytes that the group data ocupies
-        /// </summary>
-        /// <remarks>
-        /// The implementation should have `readonly` modifier
-        /// </remarks>
-        int WIDTH { get; }
+        ///// <summary>
+        ///// The bytes that the group data ocupies
+        ///// </summary>
+        ///// <remarks>
+        ///// The implementation should have `readonly` modifier
+        ///// </remarks>
+        ////int WIDTH { get; }
 
-        unsafe GroupImpl load(byte* ptr);
+        ////unsafe GroupImpl load(byte* ptr);
 
-        /// <summary>
-        /// Loads a group of bytes starting at the given address, which must be
-        /// aligned to the WIDTH
-        /// </summary>
-        /// <param name="ptr"></param>
-        /// <returns></returns>
-        unsafe GroupImpl load_aligned(byte* ptr);
+        ///// <summary>
+        ///// Loads a group of bytes starting at the given address, which must be
+        ///// aligned to the WIDTH
+        ///// </summary>
+        ///// <param name="ptr"></param>
+        ///// <returns></returns>
+        ////unsafe GroupImpl load_aligned(byte* ptr);
 
         /// <summary>
         /// Performs the following transformation on all bytes in the group:

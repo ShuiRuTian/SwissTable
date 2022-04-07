@@ -52,11 +52,11 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int? lowest_set_bit()
+        public int lowest_set_bit()
         {
             if (this._data == 0)
             {
-                return null;
+                return -1;
             }
             else
             {
@@ -94,21 +94,34 @@ namespace System.Collections.Generic
         [Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2207:Initialize value type static fields inline", Justification = "The doc says not to suppress this, but how to fix?")]
         static unsafe FallbackGroup()
         {
-            var res = new byte[sizeof(nuint)];
+            WIDTH = sizeof(nuint);
+            var res = new byte[WIDTH];
             Array.Fill(res, SwissTableHelper.EMPTY);
-            _static_empty = res;
+            static_empty = res;
         }
 
-        public unsafe readonly int WIDTH => sizeof(nuint);
+        public static readonly int WIDTH;
 
-        private static readonly byte[] _static_empty;
+        public static readonly byte[] static_empty;
 
-        public readonly byte[] static_empty => _static_empty;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static unsafe FallbackGroup load(byte* ptr)
+        {
+            return new FallbackGroup(Unsafe.ReadUnaligned<nuint>(ptr));
+        }
 
-        private nuint repeat(byte b)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static unsafe FallbackGroup load_aligned(byte* ptr)
+        {
+            // uint casting is OK, for WIDTH only use low 16 bits now.
+            Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
+            return new FallbackGroup(Unsafe.Read<nuint>(ptr));
+        }
+
+        private static nuint repeat(byte b)
         {
             nuint res = 0;
-            for (int i = 0; i < this.WIDTH; i++)
+            for (int i = 0; i < WIDTH; i++)
             {
                 res <<= 8;
                 res &= b;
@@ -121,20 +134,6 @@ namespace System.Collections.Generic
         internal FallbackGroup(nuint data)
         {
             _data = data;
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe FallbackGroup load(byte* ptr)
-        {
-            return new FallbackGroup(Unsafe.ReadUnaligned<nuint>(ptr));
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe FallbackGroup load_aligned(byte* ptr)
-        {
-            // uint casting is OK, for WIDTH only use low 16 bits now.
-            Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
-            return new FallbackGroup(Unsafe.Read<nuint>(ptr));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -166,7 +165,7 @@ namespace System.Collections.Generic
         {
             // This algorithm is derived from
             // https://graphics.stanford.edu/~seander/bithacks.html##ValueInWord
-            var cmp = this._data ^ this.repeat(b);
+            var cmp = this._data ^ repeat(b);
             var res = unchecked((cmp - (nuint)0x0101_0101_0101_0101) & ~cmp & (nuint)0x8080_8080_8080_8080);
             return new FallbackBitMask(res);
         }

@@ -51,8 +51,10 @@ namespace System.Collections.Generic
         /// Returns the first set bit in the `BitMask`, if there is one.
         /// TODO: use negative rather than nullable to represent no bit set.
         /// </summary>
-        /// <returns></returns>
-        int? lowest_set_bit();
+        /// <returns>
+        /// negative means not any bit is set.
+        /// </returns>
+        int lowest_set_bit();
 
         /// <summary>
         /// Returns the first set bit in the `BitMask`, if there is one. The
