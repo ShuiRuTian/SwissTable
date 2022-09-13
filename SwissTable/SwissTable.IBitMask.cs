@@ -26,13 +26,13 @@ namespace System.Collections.Generic
         /// Returns a new `BitMask` with all bits inverted.
         /// </summary>
         /// <returns></returns>
-        BitMaskImpl invert();
+        BitMaskImpl Invert();
 
         /// <summary>
         /// Returns a new `BitMask` with the lowest bit removed.
         /// </summary>
         /// <returns></returns>
-        BitMaskImpl remove_lowest_bit();
+        BitMaskImpl RemoveLowestBit();
 
         /// <summary>
         /// Returns a new `BitMask` with the internal data logic and.
@@ -45,7 +45,7 @@ namespace System.Collections.Generic
         /// Returns whether the `BitMask` has at least one set bit.
         /// </summary>
         /// <returns></returns>
-        bool any_bit_set();
+        bool AnyBitSet();
 
         /// <summary>
         /// Returns the first set bit in the `BitMask`, if there is one.
@@ -54,7 +54,7 @@ namespace System.Collections.Generic
         /// <returns>
         /// negative means not any bit is set.
         /// </returns>
-        int lowest_set_bit();
+        int LowestSetBit();
 
         /// <summary>
         /// Returns the first set bit in the `BitMask`, if there is one. The
@@ -62,18 +62,18 @@ namespace System.Collections.Generic
         /// </summary>
         /// <returns></returns>
         // #[cfg(feature = "nightly")]
-        int lowest_set_bit_nonzero();
+        int LowestSetBitNonzero();
 
         /// <summary>
         /// Returns the number of trailing zeroes in the `BitMask`.
         /// </summary>
         /// <returns></returns>
-        int trailing_zeros();
+        int TrailingZeros();
 
         /// <summary>
         /// Returns the number of leading zeroes in the `BitMask`.
         /// </summary>
         /// <returns></returns>
-        int leading_zeros();
+        int LeadingZeros();
     }
 }

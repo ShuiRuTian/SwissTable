@@ -9,6 +9,7 @@
 		<DebugType>pdbonly</DebugType>
 		<DebugSymbols>true</DebugSymbols>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	    <TieredCompilation>false</TieredCompilation>
 	</PropertyGroup>
 
 	<ItemGroup>

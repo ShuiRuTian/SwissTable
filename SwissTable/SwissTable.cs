@@ -86,7 +86,7 @@ namespace System.Collections.Generic
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             internal void record_item_insert_at(int index, byte old_ctrl, int hash)
             {
-                _growth_left -= special_is_empty(old_ctrl) ? 1 : 0;
+                _growth_left -= special_is_empty_with_int_return(old_ctrl);
                 set_ctrl_h2(index, hash);
                 _count += 1;
             }
@@ -137,7 +137,11 @@ namespace System.Collections.Generic
             // hash buckets become unbalanced.
             if (typeof(TKey) == typeof(string))
             {
-
+                IEqualityComparer<string>? stringComparer = NonRandomizedStringEqualityComparer.GetStringComparer(this._comparer);
+                if (stringComparer is not null)
+                {
+                    this._comparer = (IEqualityComparer<TKey>?)stringComparer;
+                }
             }
         }
 
@@ -181,8 +185,14 @@ namespace System.Collections.Generic
         {
             get
             {
-
-                return _comparer ?? EqualityComparer<TKey>.Default;
+                if (typeof(TKey) == typeof(string))
+                {
+                    return (IEqualityComparer<TKey>)IInternalStringEqualityComparer.GetUnderlyingEqualityComparer((IEqualityComparer<string?>?)_comparer);
+                }
+                else
+                {
+                    return _comparer ?? EqualityComparer<TKey>.Default;
+                }
             }
         }
 
@@ -331,10 +341,10 @@ namespace System.Collections.Generic
         {
             get
             {
-                ref TValue value = ref FindValue(key);
-                if (!Unsafe.IsNullRef(ref value))
+                ref Entry entry = ref FindBucket(key);
+                if (!Unsafe.IsNullRef(ref entry))
                 {
-                    return value;
+                    return entry.Value;
                 }
 
                 ThrowHelper.ThrowKeyNotFoundException(key);
@@ -349,10 +359,10 @@ namespace System.Collections.Generic
 
         public bool TryGetValue(TKey key, [MaybeNullWhen(false)] out TValue value)
         {
-            ref TValue valRef = ref FindValue(key);
-            if (!Unsafe.IsNullRef(ref valRef))
+            ref Entry entry = ref FindBucket(key);
+            if (!Unsafe.IsNullRef(ref entry))
             {
-                value = valRef;
+                value = entry.Value;
                 return true;
             }
 
@@ -409,7 +419,7 @@ namespace System.Collections.Generic
         }
 
         // This method not check whether array and index, maybe the name should be CopyToUnsafe?
-        private unsafe void CopyToWorker(KeyValuePair<TKey, TValue>[] array, int index)
+        private void CopyToWorker(KeyValuePair<TKey, TValue>[] array, int index)
         {
             // TODO: maybe we could fix the array then it might be safe to use load_align
             DispatchCopyToArrayFromDictionaryWorker(this, array, index);
@@ -435,10 +445,10 @@ namespace System.Collections.Generic
             {
                 if (IsCompatibleKey(key))
                 {
-                    ref TValue value = ref FindValue((TKey)key);
-                    if (!Unsafe.IsNullRef(ref value))
+                    ref Entry entry = ref FindBucket((TKey)key);
+                    if (!Unsafe.IsNullRef(ref entry))
                     {
-                        return value;
+                        return entry.Value;
                     }
                 }
 
@@ -614,8 +624,8 @@ namespace System.Collections.Generic
 
         bool ICollection<KeyValuePair<TKey, TValue>>.Remove(KeyValuePair<TKey, TValue> keyValuePair)
         {
-            ref TValue value = ref FindValue(keyValuePair.Key);
-            if (!Unsafe.IsNullRef(ref value) && EqualityComparer<TValue>.Default.Equals(value, keyValuePair.Value))
+            ref Entry bucket = ref FindBucket(keyValuePair.Key);
+            if (!Unsafe.IsNullRef(ref bucket) && EqualityComparer<TValue>.Default.Equals(bucket.Value, keyValuePair.Value))
             {
                 Remove(keyValuePair.Key);
                 return true;
@@ -721,8 +731,12 @@ namespace System.Collections.Generic
         {
             // NOTE: this method is mirrored in CollectionsMarshal.GetValueRefOrAddDefault below.
             // If you make any changes here, make sure to keep that version in sync as well.
-
-            ref var bucket = ref this.FindBucket(key);
+            if (key == null)
+            {
+                ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
+            }
+            var hashOfKey = this.GetHashCodeOfKey(key);
+            ref var bucket = ref this.FindBucket(key, hashOfKey);
             // replace
             if (!Unsafe.IsNullRef(ref bucket))
             {
@@ -740,21 +754,21 @@ namespace System.Collections.Generic
                 return false;
             }
             // insert new
-            var hashCode = this.GetHashCodeOfKey(key);
             // We can avoid growing the table once we have reached our load
             // factor if we are replacing a tombstone(Delete). This works since the
             // number of EMPTY slots does not change in this case.
-            var index = this.rawTable.find_insert_slot(hashCode);
+            var index = this.rawTable.find_insert_slot(hashOfKey);
             var old_ctrl = rawTable._controls[index];
             if (this.rawTable._growth_left == 0 && special_is_empty(old_ctrl))
             {
                 this.EnsureCapacityWorker(this.rawTable._count + 1);
-                index = this.rawTable.find_insert_slot(hashCode);
+                index = this.rawTable.find_insert_slot(hashOfKey);
             }
             Debug.Assert(rawTable._entries != null);
-            this.rawTable.record_item_insert_at(index, old_ctrl, hashCode);
-            this.rawTable._entries[index].Key = key;
-            this.rawTable._entries[index].Value = value;
+            this.rawTable.record_item_insert_at(index, old_ctrl, hashOfKey);
+            ref var targetEntry = ref this.rawTable._entries[index];
+            targetEntry.Key = key;
+            targetEntry.Value = value;
             _version++;
             return true;
         }
@@ -966,6 +980,7 @@ namespace System.Collections.Generic
         /// leave the data pointer dangling since that bucket is never written to
         /// due to our load factor forcing us to always have at least 1 free bucket.
         /// </summary>
+        [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static RawTableInner NewEmptyInnerTable()
         {
@@ -986,6 +1001,7 @@ namespace System.Collections.Generic
         /// </summary>
         // unlike rust, we never cares about out of memory
         // TODO: Maybe ref to improve performance?
+        [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static RawTableInner NewInnerTableWithControlUninitialized(int buckets)
         {
@@ -1000,13 +1016,6 @@ namespace System.Collections.Generic
             };
         }
 
-        private bool IsKeyEqual(TKey key1, TKey key2)
-        {
-            // TODO: in MyDictionary, this is a complex condition to improve performance, learn from it.
-            var comparer = this._comparer ?? EqualityComparer<TKey>.Default;
-            return comparer.Equals(key1, key2);
-        }
-
         internal ref TValue FindValue(TKey key)
         {
             // TODO: We might choose to dulpcate here too just like FindBucketIndex, but not now.
@@ -1018,27 +1027,36 @@ namespace System.Collections.Generic
             return ref bucket.Value;
         }
 
-        private unsafe ref Entry FindBucket(TKey key)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private ref Entry FindBucket(TKey key)
         {
             if (key == null)
             {
                 ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
             }
-            return ref DispatchFindBucketOfDictionary(this, key);
+            var hash = GetHashCodeOfKey(key);
+            return ref DispatchFindBucketOfDictionary(this, key, hash);
         }
 
-        // TODO: use negative as not find
-        private unsafe int FindBucketIndex(TKey key)
+        // Sometimes we need to reuse hash, do not calcualte it twice
+        // the caller should check key is not null, for it should get hash first.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private ref Entry FindBucket(TKey key, int hashOfKey)
+        {
+            return ref DispatchFindBucketOfDictionary(this, key, hashOfKey);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private int FindBucketIndex(TKey key)
         {
             if (key == null)
             {
                 ThrowHelper.ThrowArgumentNullException(ExceptionArgument.key);
             }
-
             return DispatchFindBucketIndexOfDictionary(this, key);
         }
 
-        private unsafe TValue erase(int index)
+        private TValue erase(int index)
         {
             // Attention, we could not just only set mark to `Deleted` to assume it is deleted, the reference is still here, and GC would not collect it.
             Debug.Assert(is_full(rawTable._controls[index]));
@@ -1096,12 +1114,12 @@ namespace System.Collections.Generic
             //
             // Be careful when modifying this, calculate_layout relies on the
             // overflow check here.
-            int adjusted_capacity;
+            uint adjusted_capacity;
             switch (capacity)
             {
                 // 0x01FFFFFF is the max value that would not overflow when *8
                 case <= 0x01FFFFFF:
-                    adjusted_capacity = (int)unchecked(capacity * 8 / 7);
+                    adjusted_capacity = unchecked(capacity * 8 / 7);
                     break;
                 // 0x37FFFFFF is the max value that smaller than 0x0400_0000 after *8/7
                 case <= 0x37FFFFFF:
@@ -1115,14 +1133,9 @@ namespace System.Collections.Generic
             // next_power_of_two (which can't overflow because of the previous divison).
             return nextPowerOfTwo(adjusted_capacity);
 
-            static int nextPowerOfTwo(int num)
+            static int nextPowerOfTwo(uint num)
             {
-                num |= num >> 1;
-                num |= num >> 2;
-                num |= num >> 4;
-                num |= num >> 8;
-                num |= num >> 16;
-                return num + 1;
+                return (int)(0x01u << (32 - BitOperations.LeadingZeroCount(num)));
             }
         }
 
@@ -1139,10 +1152,9 @@ namespace System.Collections.Generic
             else
             {
                 // For larger tables we reserve 12.5% of the slots as empty.
-                return (bucket_mask + 1) / 8 * 7;
+                return (bucket_mask + 1) >> 3 * 7; // bucket_mask / 8 * 7, but it will generate a bit more complex for int, maybe we should use uint?
             }
         }
-
 
         public struct Enumerator : IEnumerator<KeyValuePair<TKey, TValue>>, IDictionaryEnumerator
         {
@@ -1157,7 +1169,7 @@ namespace System.Collections.Generic
             internal const int DictEntry = 1;
             internal const int KeyValuePair = 2;
 
-            internal unsafe Enumerator(MyDictionary<TKey, TValue> dictionary, int getEnumeratorRetType)
+            internal Enumerator(MyDictionary<TKey, TValue> dictionary, int getEnumeratorRetType)
             {
                 _dictionary = dictionary;
                 _version = dictionary._version;
@@ -1234,7 +1246,7 @@ namespace System.Collections.Generic
 
             public void Dispose() { }
 
-            public unsafe bool MoveNext()
+            public bool MoveNext()
             {
                 ref var entry = ref DispatchMoveNextDictionary(_version, _tolerantVersion, _dictionary, ref _currentCtrlOffset, ref _currentBitMask);
                 if (!Unsafe.IsNullRef(ref entry))
@@ -1250,7 +1262,7 @@ namespace System.Collections.Generic
                     return false;
                 }
             }
-            unsafe void IEnumerator.Reset()
+            void IEnumerator.Reset()
             {
                 if (_version != _dictionary._version)
                 {
@@ -1397,7 +1409,7 @@ namespace System.Collections.Generic
                 private bool _isValid; // valid when _current has correct value.
                 private TKey? _current;
 
-                internal unsafe Enumerator(MyDictionary<TKey, TValue> dictionary)
+                internal Enumerator(MyDictionary<TKey, TValue> dictionary)
                 {
                     _dictionary = dictionary;
                     _version = dictionary._version;
@@ -1410,7 +1422,7 @@ namespace System.Collections.Generic
 
                 public void Dispose() { }
 
-                public unsafe bool MoveNext()
+                public bool MoveNext()
                 {
                     ref var entry = ref DispatchMoveNextDictionary(_version, _tolerantVersion, _dictionary, ref _currentCtrlOffset, ref _currentBitMask);
                     if (!Unsafe.IsNullRef(ref entry))
@@ -1442,7 +1454,7 @@ namespace System.Collections.Generic
                     }
                 }
 
-                unsafe void IEnumerator.Reset()
+                void IEnumerator.Reset()
                 {
                     if (_version != _dictionary._version)
                     {
@@ -1587,7 +1599,7 @@ namespace System.Collections.Generic
                 private bool _isValid; // valid when _current has correct value.
                 private TValue? _current;
 
-                internal unsafe Enumerator(MyDictionary<TKey, TValue> dictionary)
+                internal Enumerator(MyDictionary<TKey, TValue> dictionary)
                 {
                     _dictionary = dictionary;
                     _version = dictionary._version;
@@ -1600,7 +1612,7 @@ namespace System.Collections.Generic
 
                 public void Dispose() { }
 
-                public unsafe bool MoveNext()
+                public bool MoveNext()
                 {
                     ref var entry = ref DispatchMoveNextDictionary(_version, _tolerantVersion, _dictionary, ref _currentCtrlOffset, ref _currentBitMask);
                     if (!Unsafe.IsNullRef(ref entry))
@@ -1632,7 +1644,7 @@ namespace System.Collections.Generic
                     }
                 }
 
-                unsafe void IEnumerator.Reset()
+                void IEnumerator.Reset()
                 {
                     if (_version != _dictionary._version)
                     {

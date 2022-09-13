@@ -22,25 +22,25 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Avx2BitMask invert()
+        public Avx2BitMask Invert()
         {
             return new Avx2BitMask((this._data ^ BITMASK_MASK));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool any_bit_set()
+        public bool AnyBitSet()
         {
             return this._data != 0;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int leading_zeros()
+        public int LeadingZeros()
         {
             return BitOperations.LeadingZeroCount(this._data);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int lowest_set_bit()
+        public int LowestSetBit()
         {
             if (this._data == 0)
             {
@@ -48,24 +48,24 @@ namespace System.Collections.Generic
             }
             else
             {
-                return this.lowest_set_bit_nonzero();
+                return this.LowestSetBitNonzero();
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int lowest_set_bit_nonzero()
+        public int LowestSetBitNonzero()
         {
-            return this.trailing_zeros();
+            return this.TrailingZeros();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Avx2BitMask remove_lowest_bit()
+        public Avx2BitMask RemoveLowestBit()
         {
             return new Avx2BitMask(this._data & (this._data - 1));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int trailing_zeros()
+        public int TrailingZeros()
         {
             return BitOperations.TrailingZeroCount(this._data);
         }
@@ -80,17 +80,8 @@ namespace System.Collections.Generic
     // TODO: suppress default initialization.
     internal struct Avx2Group : IGroup<Avx2BitMask, Avx2Group>
     {
-        [Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2207:Initialize value type static fields inline", Justification = "The doc says not to suppress this, but how to fix?")]
-        static Avx2Group()
-        {
-            WIDTH = 256 / 8;
-            var res = new byte[WIDTH];
-            Array.Fill(res, SwissTableHelper.EMPTY);
-            static_empty = res;
-        }
-
-        // 128 bits(_data length) / 8 (byte bits) = 16 bytes
-        public static readonly int WIDTH;
+        // 256 bits(_data length) / 8 (byte bits) = 32 bytes
+        public static int WIDTH => 256 / 8;
 
         private readonly Vector256<byte> _data;
 
@@ -99,16 +90,23 @@ namespace System.Collections.Generic
             _data = data;
         }
 
-        public static readonly byte[] static_empty;
+        public static readonly byte[] StaticEmpty = InitialStaticEmpty();
+
+        private static byte[] InitialStaticEmpty()
+        {
+            var res = new byte[WIDTH];
+            Array.Fill(res, SwissTableHelper.EMPTY);
+            return res;
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static unsafe Avx2Group load(byte* ptr)
+        public static unsafe Avx2Group Load(byte* ptr)
         {
             return new Avx2Group(Avx2.LoadVector256(ptr));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static unsafe Avx2Group load_aligned(byte* ptr)
+        public static unsafe Avx2Group LoadAligned(byte* ptr)
         {
             // `uint` casting is OK, WIDTH is 32, so checking lowest 5 bits for address align
             Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
@@ -116,7 +114,7 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe void store_aligned(byte* ptr)
+        public unsafe void StoreAligned(byte* ptr)
         {
             // `uint` casting is OK, WIDTH is 32, so checking lowest 5 bits for address align
             Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
@@ -124,7 +122,7 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Avx2BitMask match_byte(byte b)
+        public Avx2BitMask MatchByte(byte b)
         {
             // TODO: Check how compiler create this, which command it uses. This might incluence performance dramatically.
             var compareValue = Vector256.Create(b);
@@ -132,23 +130,26 @@ namespace System.Collections.Generic
             return new Avx2BitMask((uint)Avx2.MoveMask(cmp));
         }
 
+        private static readonly Avx2Group EmptyGroup = Create(SwissTableHelper.EMPTY);
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Avx2BitMask match_empty()
+        public Avx2BitMask MatchEmpty()
         {
-            return this.match_byte(SwissTableHelper.EMPTY);
+            return this.MatchGroup(EmptyGroup);
+            // return this.match_byte(SwissTableHelper.EMPTY);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Avx2BitMask match_empty_or_deleted()
+        public Avx2BitMask MatchEmptyOrDeleted()
         {
             // A byte is EMPTY or DELETED iff the high bit is set
             return new Avx2BitMask((uint)Avx2.MoveMask(this._data));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public Avx2BitMask match_full()
+        public Avx2BitMask MatchFull()
         {
-            return this.match_empty_or_deleted().invert();
+            return this.MatchEmptyOrDeleted().Invert();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -167,6 +168,19 @@ namespace System.Collections.Generic
             // TODO: check whether asXXXX could be removed.
             var special = Avx2.CompareGreaterThan(zero, this._data.AsSByte()).AsByte();
             return new Avx2Group(Avx2.Or(special, Vector256.Create((byte)0x80)));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Avx2Group Create(byte b)
+        {
+            return new Avx2Group(Vector256.Create(b));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Avx2BitMask MatchGroup(Avx2Group group)
+        {
+            var cmp = Avx2.CompareEqual(this._data, group._data);
+            return new Avx2BitMask((uint)Avx2.MoveMask(cmp));
         }
     }
 }

@@ -24,6 +24,65 @@ it is well-documentated, however, like C and C++, it prefers abbr. We should try
 
 ### difference
 
+### Optimisation in my implementation step by step
+1. boxing and unboxing
+For performance, we should use struct as possiable as we could. But we also want abstract to have type check.
+``` cs
+IGroup static Foo(){
+    // Do something...
+    // Finally return a new one with new data, we hide the data here.
+    return Sse2Group(); // Sse2Group is a struct, and this method is in Sse2Group too.
+}
+```
+Is it ok to call method Chainly like this?
+At first, I thought CLR will inline, after inline it will find Sse2Group is also struct so there will be no boxing.
+However, I am wrong. So I have to write some more ugly code.
+After fixing, this gives a huge perf improvement.
+In my test case, reduce time from 780 to 620
+
+2. Inline more
+[MethodImpl(MethodImplOptions.AggressiveInlining)]
+It is proven this is pretty powerful and need to be controled carefully
+This might introduce +200 or -200 easily.
+
+3. Not yet readonly variable and readonly parameter
+``` cs
+[MethodImpl(MethodImplOptions.AggressiveInlining)]
+public Avx2BitMask match_byte(byte b)
+{
+    // TODO: Check how compiler create this, which command it uses. This might incluence performance dramatically.
+    var compareValue = Vector256.Create(b);
+    var cmp = Avx2.CompareEqual(this._data, compareValue);
+    return new Avx2BitMask((uint)Avx2.MoveMask(cmp));
+}
+```
+Looks good, right?
+However, this method is called in a loop.
+We could not mark `b` and `compareValue` as readonly, so it always create a new one when call this method.
+Have to add some more method and not use this friendly method.
+this reduce about 20.
+
+4. pointer
+This is dangerous, however, we might need it to avoid edge check.
+
+5. inline in Value type and reference type
+This is used in C# now.
+If there is no provided comparer. 
+``` cs
+EqualityComparer<TKey>.Default.Equals(a,b)
+```
+This will be inlined for value type, 
+but for reference type it is harmful.
+Treat it differently
+``` cs
+if (hashComparer == null)
+{
+    if (typeof(TKey).IsValueType) { }
+    else {}
+}
+```
+this reduce about 40
+
 #### Find
 Find bucket to insert and find bucket with specific key is differnt.
 
@@ -71,6 +130,9 @@ git clone --single-branch --branch implement-swisstable-as-hashmap https://githu
 # run test for collections
 cd src\libraries\System.Collections\tests
 dotnet build /t:Test
+
+# close tired compile 
+$env:DOTNET_TieredCompilation = 0
 
 ##### performance
 $reposRoot = "D:\MyRepo"

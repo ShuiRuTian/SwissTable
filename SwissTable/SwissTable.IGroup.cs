@@ -4,7 +4,7 @@
 namespace System.Collections.Generic
 {
 
-    /// After C#11, `static_empty`, `load` and `load_aligned` should become static abstract mehod
+    /// After C#11, `static_empty`, `create`, `load` and `load_aligned` should become static abstract mehod
     internal interface IGroup<BitMaskImpl, GroupImpl>
         where BitMaskImpl : struct, IBitMask<BitMaskImpl>
         where GroupImpl : struct, IGroup<BitMaskImpl, GroupImpl>
@@ -48,7 +48,7 @@ namespace System.Collections.Generic
         /// aligned to WIDTH
         /// </summary>
         /// <param name="ptr"></param>
-        unsafe void store_aligned(byte* ptr);
+        unsafe void StoreAligned(byte* ptr);
 
         /// <summary>
         /// Returns a `BitMask` indicating all bytes in the group which have
@@ -56,27 +56,45 @@ namespace System.Collections.Generic
         /// </summary>
         /// <param name="b"></param>
         /// <returns></returns>
-        BitMaskImpl match_byte(byte b);
+        BitMaskImpl MatchByte(byte b);
+
+        // <summary>
+        // Returns a `GroupImpl` with given byte brodcast.
+        // </summary>
+        // <param name="group"></param>
+        // <returns></returns>
+        // match_byte is good enough, however, we do not have readonly parameter now,
+        // so we need add this as an optimsation.
+        // GroupImpl create(byte b);
+
+        // match_byte is good enough, however, we do not have readonly parameter now,
+        // so we need add this as an optimsation.
+        /// <summary>
+        /// Returns a `BitMask` indicating all bytes in the group is matched with another group
+        /// </summary>
+        /// <param name="group"></param>
+        /// <returns></returns>
+        BitMaskImpl MatchGroup(GroupImpl group);
 
         /// <summary>
         /// Returns a `BitMask` indicating all bytes in the group which are
         /// `EMPTY`.
         /// </summary>
         /// <returns></returns>
-        BitMaskImpl match_empty();
+        BitMaskImpl MatchEmpty();
 
         /// <summary>
         /// Returns a `BitMask` indicating all bytes in the group which are
         /// `EMPTY` or `DELETED`.
         /// </summary>
         /// <returns></returns>
-        BitMaskImpl match_empty_or_deleted();
+        BitMaskImpl MatchEmptyOrDeleted();
 
 
         /// <summary>
         /// Returns a `BitMask` indicating all bytes in the group which are full.
         /// </summary>
         /// <returns></returns>
-        BitMaskImpl match_full();
+        BitMaskImpl MatchFull();
     }
 }

@@ -26,19 +26,19 @@ namespace System.Collections.Generic
 
         /// Returns a new `BitMask` with all bits inverted.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public FallbackBitMask invert()
+        public FallbackBitMask Invert()
         {
             return new FallbackBitMask(this._data ^ BITMASK_MASK);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool any_bit_set()
+        public bool AnyBitSet()
         {
             return this._data != 0;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int leading_zeros()
+        public int LeadingZeros()
         {
 #if TARGET_64BIT
             return BitOperations.LeadingZeroCount(this._data) >> BITMASK_SHIFT;
@@ -52,7 +52,7 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int lowest_set_bit()
+        public int LowestSetBit()
         {
             if (this._data == 0)
             {
@@ -60,24 +60,24 @@ namespace System.Collections.Generic
             }
             else
             {
-                return this.lowest_set_bit_nonzero();
+                return this.LowestSetBitNonzero();
             }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int lowest_set_bit_nonzero()
+        public int LowestSetBitNonzero()
         {
-            return this.trailing_zeros();
+            return this.TrailingZeros();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public FallbackBitMask remove_lowest_bit()
+        public FallbackBitMask RemoveLowestBit()
         {
             return new FallbackBitMask(this._data & (this._data - 1));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public int trailing_zeros()
+        public int TrailingZeros()
         {
             return BitOperations.TrailingZeroCount(this._data) >> BITMASK_SHIFT;
         }
@@ -91,18 +91,16 @@ namespace System.Collections.Generic
 
     internal struct FallbackGroup : IGroup<FallbackBitMask, FallbackGroup>
     {
-        [Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2207:Initialize value type static fields inline", Justification = "The doc says not to suppress this, but how to fix?")]
-        static unsafe FallbackGroup()
+        public static unsafe int WIDTH => sizeof(nuint);
+
+        public static readonly byte[] static_empty = InitialStaticEmpty();
+
+        private static byte[] InitialStaticEmpty()
         {
-            WIDTH = sizeof(nuint);
             var res = new byte[WIDTH];
             Array.Fill(res, SwissTableHelper.EMPTY);
-            static_empty = res;
+            return res;
         }
-
-        public static readonly int WIDTH;
-
-        public static readonly byte[] static_empty;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe FallbackGroup load(byte* ptr)
@@ -153,7 +151,7 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe void store_aligned(byte* ptr)
+        public unsafe void StoreAligned(byte* ptr)
         {
             // uint casting is OK, for WIDTH only use low 16 bits now.
             Debug.Assert(((uint)ptr & (WIDTH - 1)) == 0);
@@ -161,7 +159,7 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public FallbackBitMask match_byte(byte b)
+        public FallbackBitMask MatchByte(byte b)
         {
             // This algorithm is derived from
             // https://graphics.stanford.edu/~seander/bithacks.html##ValueInWord
@@ -171,7 +169,7 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public FallbackBitMask match_empty()
+        public FallbackBitMask MatchEmpty()
         {
             // If the high bit is set, then the byte must be either:
             // 1111_1111 (EMPTY) or 1000_0000 (DELETED).
@@ -180,16 +178,26 @@ namespace System.Collections.Generic
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public FallbackBitMask match_empty_or_deleted()
+        public FallbackBitMask MatchEmptyOrDeleted()
         {
             // A byte is EMPTY or DELETED iff the high bit is set
             return new FallbackBitMask(this._data & unchecked((nuint)0x8080_8080_8080_8080));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public FallbackBitMask match_full()
+        public FallbackBitMask MatchFull()
         {
-            return this.match_empty_or_deleted().invert();
+            return this.MatchEmptyOrDeleted().Invert();
+        }
+
+        public static FallbackGroup create(byte b)
+        {
+            throw new NotImplementedException();
+        }
+
+        public FallbackBitMask MatchGroup(FallbackGroup group)
+        {
+            throw new NotImplementedException();
         }
     }
 }
