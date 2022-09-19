@@ -216,10 +216,10 @@ namespace System.Collections.Generic
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ref Dictionary<TKey, TValue>.Entry DispatchMoveNextDictionary<TKey, TValue>(
+        public static ref MyDictionary<TKey, TValue>.Entry DispatchMoveNextDictionary<TKey, TValue>(
             int version,
             int tolerantVersion,
-            in Dictionary<TKey, TValue> dictionary,
+            in MyDictionary<TKey, TValue> dictionary,
             ref int currentCtrlOffset,
             ref BitMaskUnion currentBitMask
             )
@@ -242,10 +242,10 @@ namespace System.Collections.Generic
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ref Dictionary<TKey, TValue>.Entry MoveNextDictionaryForAvx2<TKey, TValue>(
+        public static ref MyDictionary<TKey, TValue>.Entry MoveNextDictionaryForAvx2<TKey, TValue>(
             int version,
             int tolerantVersion,
-            in Dictionary<TKey, TValue> dictionary,
+            in MyDictionary<TKey, TValue> dictionary,
             ref int currentCtrlOffset,
             ref BitMaskUnion currentBitMask
             )
@@ -279,7 +279,7 @@ namespace System.Collections.Generic
                 currentCtrlOffset += GROUP_WIDTH;
                 if (currentCtrlOffset >= dictionary._buckets)
                 {
-                    return ref Unsafe.NullRef<Dictionary<TKey, TValue>.Entry>();
+                    return ref Unsafe.NullRef<MyDictionary<TKey, TValue>.Entry>();
                 }
                 realBitMask = GetMatchFullBitMaskForAvx2(controls, currentCtrlOffset).avx2BitMask;
             }
@@ -287,10 +287,10 @@ namespace System.Collections.Generic
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ref Dictionary<TKey, TValue>.Entry MoveNextDictionaryForSse2<TKey, TValue>(
+        public static ref MyDictionary<TKey, TValue>.Entry MoveNextDictionaryForSse2<TKey, TValue>(
             int version,
             int tolerantVersion,
-            in Dictionary<TKey, TValue> dictionary,
+            in MyDictionary<TKey, TValue> dictionary,
             ref int currentCtrlOffset,
             ref BitMaskUnion currentBitMask
             )
@@ -324,7 +324,7 @@ namespace System.Collections.Generic
                 currentCtrlOffset += GROUP_WIDTH;
                 if (currentCtrlOffset >= dictionary._buckets)
                 {
-                    return ref Unsafe.NullRef<Dictionary<TKey, TValue>.Entry>();
+                    return ref Unsafe.NullRef<MyDictionary<TKey, TValue>.Entry>();
                 }
                 realBitMask = GetMatchFullBitMaskForSse2(controls, currentCtrlOffset).sse2BitMask;
             }
@@ -332,10 +332,10 @@ namespace System.Collections.Generic
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ref Dictionary<TKey, TValue>.Entry MoveNextDictionaryForFallback<TKey, TValue>(
+        public static ref MyDictionary<TKey, TValue>.Entry MoveNextDictionaryForFallback<TKey, TValue>(
             int version,
             int tolerantVersion,
-            in Dictionary<TKey, TValue> dictionary,
+            in MyDictionary<TKey, TValue> dictionary,
             ref int currentCtrlOffset,
             ref BitMaskUnion currentBitMask
             )
@@ -369,7 +369,7 @@ namespace System.Collections.Generic
                 currentCtrlOffset += GROUP_WIDTH;
                 if (currentCtrlOffset >= dictionary._buckets)
                 {
-                    return ref Unsafe.NullRef<Dictionary<TKey, TValue>.Entry>();
+                    return ref Unsafe.NullRef<MyDictionary<TKey, TValue>.Entry>();
                 }
                 realBitMask = GetMatchFullBitMaskForFallback(controls, currentCtrlOffset).fallbackBitMask;
             }
@@ -449,7 +449,7 @@ namespace System.Collections.Generic
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ref Dictionary<TKey, TValue>.Entry DispatchFindBucketOfDictionary<TKey, TValue>(Dictionary<TKey, TValue> dictionary, TKey key, int hashOfKey)
+        public static ref MyDictionary<TKey, TValue>.Entry DispatchFindBucketOfDictionary<TKey, TValue>(MyDictionary<TKey, TValue> dictionary, TKey key, int hashOfKey)
         where TKey : notnull
         {
             // if (Avx2.IsSupported)
@@ -469,7 +469,7 @@ namespace System.Collections.Generic
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe ref Dictionary<TKey, TValue>.Entry FindBucketOfDictionaryForAvx2<TKey, TValue>(Dictionary<TKey, TValue> dictionary, TKey key, int hash)
+        private static unsafe ref MyDictionary<TKey, TValue>.Entry FindBucketOfDictionaryForAvx2<TKey, TValue>(MyDictionary<TKey, TValue> dictionary, TKey key, int hash)
         where TKey : notnull
         {
             var controls = dictionary.rawTable._controls;
@@ -510,7 +510,7 @@ namespace System.Collections.Generic
                             }
                             if (group.MatchEmpty().AnyBitSet())
                             {
-                                return ref Unsafe.NullRef<Dictionary<TKey, TValue>.Entry>();
+                                return ref Unsafe.NullRef<MyDictionary<TKey, TValue>.Entry>();
                             }
                             probeSeq.move_next();
                         }
@@ -541,7 +541,7 @@ namespace System.Collections.Generic
                             }
                             if (group.MatchEmpty().AnyBitSet())
                             {
-                                return ref Unsafe.NullRef<Dictionary<TKey, TValue>.Entry>();
+                                return ref Unsafe.NullRef<MyDictionary<TKey, TValue>.Entry>();
                             }
                             probeSeq.move_next();
                         }
@@ -572,7 +572,7 @@ namespace System.Collections.Generic
                         }
                         if (group.MatchEmpty().AnyBitSet())
                         {
-                            return ref Unsafe.NullRef<Dictionary<TKey, TValue>.Entry>();
+                            return ref Unsafe.NullRef<MyDictionary<TKey, TValue>.Entry>();
                         }
                         probeSeq.move_next();
                     }
@@ -582,7 +582,7 @@ namespace System.Collections.Generic
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe ref Dictionary<TKey, TValue>.Entry FindBucketOfDictionaryForSse2<TKey, TValue>(Dictionary<TKey, TValue> dictionary, TKey key, int hash)
+        private static unsafe ref MyDictionary<TKey, TValue>.Entry FindBucketOfDictionaryForSse2<TKey, TValue>(MyDictionary<TKey, TValue> dictionary, TKey key, int hash)
         where TKey : notnull
         {
             var controls = dictionary.rawTable._controls;
@@ -623,7 +623,7 @@ namespace System.Collections.Generic
                             }
                             if (group.MatchEmpty().AnyBitSet())
                             {
-                                return ref Unsafe.NullRef<Dictionary<TKey, TValue>.Entry>();
+                                return ref Unsafe.NullRef<MyDictionary<TKey, TValue>.Entry>();
                             }
                             probeSeq.move_next();
                         }
@@ -654,7 +654,7 @@ namespace System.Collections.Generic
                             }
                             if (group.MatchEmpty().AnyBitSet())
                             {
-                                return ref Unsafe.NullRef<Dictionary<TKey, TValue>.Entry>();
+                                return ref Unsafe.NullRef<MyDictionary<TKey, TValue>.Entry>();
                             }
                             probeSeq.move_next();
                         }
@@ -685,7 +685,7 @@ namespace System.Collections.Generic
                         }
                         if (group.MatchEmpty().AnyBitSet())
                         {
-                            return ref Unsafe.NullRef<Dictionary<TKey, TValue>.Entry>();
+                            return ref Unsafe.NullRef<MyDictionary<TKey, TValue>.Entry>();
                         }
                         probeSeq.move_next();
                     }
@@ -695,7 +695,7 @@ namespace System.Collections.Generic
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe ref Dictionary<TKey, TValue>.Entry FindBucketOfDictionaryForFallback<TKey, TValue>(Dictionary<TKey, TValue> dictionary, TKey key, int hash)
+        private static unsafe ref MyDictionary<TKey, TValue>.Entry FindBucketOfDictionaryForFallback<TKey, TValue>(MyDictionary<TKey, TValue> dictionary, TKey key, int hash)
         where TKey : notnull
         {
             var controls = dictionary.rawTable._controls;
@@ -736,7 +736,7 @@ namespace System.Collections.Generic
                             }
                             if (group.MatchEmpty().AnyBitSet())
                             {
-                                return ref Unsafe.NullRef<Dictionary<TKey, TValue>.Entry>();
+                                return ref Unsafe.NullRef<MyDictionary<TKey, TValue>.Entry>();
                             }
                             probeSeq.move_next();
                         }
@@ -767,7 +767,7 @@ namespace System.Collections.Generic
                             }
                             if (group.MatchEmpty().AnyBitSet())
                             {
-                                return ref Unsafe.NullRef<Dictionary<TKey, TValue>.Entry>();
+                                return ref Unsafe.NullRef<MyDictionary<TKey, TValue>.Entry>();
                             }
                             probeSeq.move_next();
                         }
@@ -798,7 +798,7 @@ namespace System.Collections.Generic
                         }
                         if (group.MatchEmpty().AnyBitSet())
                         {
-                            return ref Unsafe.NullRef<Dictionary<TKey, TValue>.Entry>();
+                            return ref Unsafe.NullRef<MyDictionary<TKey, TValue>.Entry>();
                         }
                         probeSeq.move_next();
                     }
@@ -818,7 +818,7 @@ namespace System.Collections.Generic
         /// </returns>
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static int DispatchFindBucketIndexOfDictionary<TKey, TValue>(Dictionary<TKey, TValue> dictionary, TKey key)
+        public static int DispatchFindBucketIndexOfDictionary<TKey, TValue>(MyDictionary<TKey, TValue> dictionary, TKey key)
     where TKey : notnull
         {
             // if (Avx2.IsSupported)
@@ -838,7 +838,7 @@ namespace System.Collections.Generic
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe int FindBucketIndexOfDictionaryForAvx2<TKey, TValue>(Dictionary<TKey, TValue> dictionary, TKey key)
+        private static unsafe int FindBucketIndexOfDictionaryForAvx2<TKey, TValue>(MyDictionary<TKey, TValue> dictionary, TKey key)
            where TKey : notnull
         {
             var controls = dictionary.rawTable._controls;
@@ -952,7 +952,7 @@ namespace System.Collections.Generic
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe int FindBucketIndexOfDictionaryForSse2<TKey, TValue>(Dictionary<TKey, TValue> dictionary, TKey key)
+        private static unsafe int FindBucketIndexOfDictionaryForSse2<TKey, TValue>(MyDictionary<TKey, TValue> dictionary, TKey key)
            where TKey : notnull
         {
             var controls = dictionary.rawTable._controls;
@@ -1066,7 +1066,7 @@ namespace System.Collections.Generic
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe int FindBucketIndexOfDictionaryForFallback<TKey, TValue>(Dictionary<TKey, TValue> dictionary, TKey key)
+        private static unsafe int FindBucketIndexOfDictionaryForFallback<TKey, TValue>(MyDictionary<TKey, TValue> dictionary, TKey key)
            where TKey : notnull
         {
             var controls = dictionary.rawTable._controls;
@@ -1180,7 +1180,7 @@ namespace System.Collections.Generic
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static void DispatchCopyToArrayFromDictionaryWorker<TKey, TValue>(Dictionary<TKey, TValue> dictionary, KeyValuePair<TKey, TValue>[] destArray, int index)
+        public static void DispatchCopyToArrayFromDictionaryWorker<TKey, TValue>(MyDictionary<TKey, TValue> dictionary, KeyValuePair<TKey, TValue>[] destArray, int index)
             where TKey : notnull
         {
             // if (Avx2.IsSupported)
@@ -1200,7 +1200,7 @@ namespace System.Collections.Generic
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe void CopyToArrayFromDictionaryWorkerForAvx2<TKey, TValue>(Dictionary<TKey, TValue> dictionary, KeyValuePair<TKey, TValue>[] destArray, int index)
+        private static unsafe void CopyToArrayFromDictionaryWorkerForAvx2<TKey, TValue>(MyDictionary<TKey, TValue> dictionary, KeyValuePair<TKey, TValue>[] destArray, int index)
             where TKey : notnull
         {
             int offset = 0;
@@ -1236,7 +1236,7 @@ namespace System.Collections.Generic
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe void CopyToArrayFromDictionaryWorkerForSse2<TKey, TValue>(Dictionary<TKey, TValue> dictionary, KeyValuePair<TKey, TValue>[] destArray, int index)
+        private static unsafe void CopyToArrayFromDictionaryWorkerForSse2<TKey, TValue>(MyDictionary<TKey, TValue> dictionary, KeyValuePair<TKey, TValue>[] destArray, int index)
             where TKey : notnull
         {
             int offset = 0;
@@ -1272,7 +1272,7 @@ namespace System.Collections.Generic
 
         [SkipLocalsInit]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static unsafe void CopyToArrayFromDictionaryWorkerForFallback<TKey, TValue>(Dictionary<TKey, TValue> dictionary, KeyValuePair<TKey, TValue>[] destArray, int index)
+        private static unsafe void CopyToArrayFromDictionaryWorkerForFallback<TKey, TValue>(MyDictionary<TKey, TValue> dictionary, KeyValuePair<TKey, TValue>[] destArray, int index)
             where TKey : notnull
         {
             int offset = 0;

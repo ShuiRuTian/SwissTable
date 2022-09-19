@@ -1,7 +1,7 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-// Used by Hashtable and Dictionary's SeralizationInfo .ctor's to store the SeralizationInfo
+// Used by Hashtable and MyDictionary's SeralizationInfo .ctor's to store the SeralizationInfo
 // object until OnDeserialization is called.
 
 using System.Threading;
