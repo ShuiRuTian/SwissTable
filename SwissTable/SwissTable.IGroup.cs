@@ -6,8 +6,8 @@ namespace System.Collections.Generic
 
     /// After C#11, `static_empty`, `create`, `load` and `load_aligned` should become static abstract mehod
     internal interface IGroup<BitMaskImpl, GroupImpl>
-        where BitMaskImpl : struct, IBitMask<BitMaskImpl>
-        where GroupImpl : struct, IGroup<BitMaskImpl, GroupImpl>
+        where BitMaskImpl : unmanaged, IBitMask<BitMaskImpl>
+        where GroupImpl : unmanaged, IGroup<BitMaskImpl, GroupImpl>
     {
         ///// <summary>
         ///// Returns a full group of empty bytes, suitable for use as the initial

@@ -20,7 +20,7 @@ namespace System.Collections.Generic
     // All implementations should be struct for performance, however, if the returned type is interface, there will be boxing and unboxing.
     // And inline will not work too.
     // So we need to pass a implementation.
-    internal interface IBitMask<BitMaskImpl> where BitMaskImpl : struct, IBitMask<BitMaskImpl>
+    internal interface IBitMask<BitMaskImpl> where BitMaskImpl : unmanaged, IBitMask<BitMaskImpl>
     {
         /// <summary>
         /// Returns a new `BitMask` with all bits inverted.

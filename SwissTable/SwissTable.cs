@@ -30,17 +30,17 @@ namespace System.Collections.Generic
         // Only when construct from another collection, user could assign a new comparer, we decide to treat this situation as a edge case.
         internal struct RawTableInner
         {
-            internal int _bucket_mask;
+            // Number of elements that can be inserted before we need to grow the table
+            // This need to be calculated individually, for the tombstone("DELETE")
+            internal int _growth_left;
             // TODO: If we could make _controls memory aligned(explicit memory layout or _dummy variable?), we could use load_align rather than load to speed up
             // TODO: maybe _controls could be Span and allocate memory from unmanaged memory?
             internal byte[] _controls;
             internal Entry[]? _entries;
-            // Number of elements that can be inserted before we need to grow the table
-            // This need to be calculated individually, for the tombstone("DELETE")
-            internal int _growth_left;
             // number of real values stored in the map
             // `items` in rust
             internal int _count;
+            internal int _bucket_mask;
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             internal void set_ctrl_h2(int index, int hash)
@@ -137,11 +137,12 @@ namespace System.Collections.Generic
             // hash buckets become unbalanced.
             if (typeof(TKey) == typeof(string))
             {
-                IEqualityComparer<string>? stringComparer = NonRandomizedStringEqualityComparer.GetStringComparer(this._comparer);
-                if (stringComparer is not null)
-                {
-                    this._comparer = (IEqualityComparer<TKey>?)stringComparer;
-                }
+                throw new Exception("We do not compare string, because the internal details is not exported");
+                //IEqualityComparer<string>? stringComparer = NonRandomizedStringEqualityComparer.GetStringComparer(this._comparer);
+                //if (stringComparer is not null)
+                //{
+                //    this._comparer = (IEqualityComparer<TKey>?)stringComparer;
+                //}
             }
         }
 
@@ -187,7 +188,8 @@ namespace System.Collections.Generic
             {
                 if (typeof(TKey) == typeof(string))
                 {
-                    return (IEqualityComparer<TKey>)IInternalStringEqualityComparer.GetUnderlyingEqualityComparer((IEqualityComparer<string?>?)_comparer);
+                    throw new Exception("We do not compare string, because the internal details is not exported");
+                    // return (IEqualityComparer<TKey>)IInternalStringEqualityComparer.GetUnderlyingEqualityComparer((IEqualityComparer<string?>?)_comparer);
                 }
                 else
                 {
@@ -1152,7 +1154,7 @@ namespace System.Collections.Generic
             else
             {
                 // For larger tables we reserve 12.5% of the slots as empty.
-                return (bucket_mask + 1) >> 3 * 7; // bucket_mask / 8 * 7, but it will generate a bit more complex for int, maybe we should use uint?
+                return ((bucket_mask + 1) >> 3) * 7; // bucket_mask / 8 * 7, but it will generate a bit more complex for int, maybe we should use uint?
             }
         }
 

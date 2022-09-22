@@ -85,7 +85,7 @@ namespace System.Collections.Generic
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public FallbackBitMask And(FallbackBitMask bitMask)
         {
-            return new FallbackBitMask(this._data & ((FallbackBitMask)bitMask)._data);
+            return new FallbackBitMask(this._data & bitMask._data);
         }
     }
 
