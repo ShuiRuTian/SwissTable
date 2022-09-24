@@ -780,7 +780,7 @@ namespace System.Collections.Generic
         /// These methods are relatively niche and only used in specific scenarios, so adding them in a separate type avoids
         /// the additional overhead on each <see cref="MyDictionary{TKey, TValue}"/> instantiation, especially in AOT scenarios.
         /// </summary>
-        internal static class CollectionsMarshalHelper
+        public static class CollectionsMarshalHelper
         {
             /// <inheritdoc cref="Runtime.InteropServices.CollectionsMarshal.GetValueRefOrAddDefault{TKey, TValue}(MyDictionary{TKey, TValue}, TKey, out bool)"/>
             public static ref TValue? GetValueRefOrAddDefault(MyDictionary<TKey, TValue> dictionary, TKey key, out bool exists)
