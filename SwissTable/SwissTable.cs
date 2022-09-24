@@ -153,7 +153,6 @@ namespace System.Collections.Generic
             InitializeComparer(comparer);
             if (dictionary == null)
             {
-                InitializeInnerTable(0);
                 ThrowHelper.ThrowArgumentNullException(ExceptionArgument.dictionary);
             }
 
@@ -167,7 +166,6 @@ namespace System.Collections.Generic
             InitializeComparer(comparer);
             if (collection == null)
             {
-                InitializeInnerTable(0);
                 ThrowHelper.ThrowArgumentNullException(ExceptionArgument.collection);
             }
 
